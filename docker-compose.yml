@@ -15,8 +15,18 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=3000
+      - HOST=0.0.0.0
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/slopstudios3
       - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev-jwt-secret-change-in-production
+      - APP_SECRET=dev-app-secret-change-in-production
+      - JWT_EXPIRES_IN=7d
+      - SESSION_TTL=86400
+      - LOG_LEVEL=debug
+      - CORS_ORIGIN=http://localhost:3000
+      - CORS_CREDENTIALS=true
+      - RATE_LIMIT_WINDOW_MS=900000
+      - RATE_LIMIT_MAX_REQUESTS=100
     depends_on:
       db:
         condition: service_healthy
@@ -25,6 +35,12 @@ services:
     networks:
       - slopstudios-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # PostgreSQL Database
   db:
