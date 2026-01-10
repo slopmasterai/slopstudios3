@@ -1,0 +1,20 @@
+# ===========================================
+# Slop Studios 3 - Staging Environment Variables
+# ===========================================
+# Copy this file to terraform.tfvars and fill in your values
+# NEVER commit terraform.tfvars to version control!
+
+# AWS Configuration
+# aws_region = "us-east-1"
+
+# Application Configuration
+# container_image = "ghcr.io/slopstudios/slopstudios3:develop"
+
+# Database Credentials (sensitive - use AWS Secrets Manager in production)
+# db_username = "dbadmin"
+
+# SSL Certificate
+# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxx"
+
+# Monitoring
+# alarm_email = "staging-alerts@slopstudios.com"

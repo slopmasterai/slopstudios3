@@ -1,0 +1,20 @@
+# ===========================================
+# Slop Studios 3 - Production Environment Variables
+# ===========================================
+# Copy this file to terraform.tfvars and fill in your values
+# NEVER commit terraform.tfvars to version control!
+
+# AWS Configuration
+# aws_region = "us-east-1"
+
+# Application Configuration
+# container_image = "ghcr.io/slopstudios/slopstudios3:v1.0.0"
+
+# Database Credentials (use AWS Secrets Manager - do not store here!)
+# db_username = "dbadmin"
+
+# SSL Certificate (required for production)
+# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxx"
+
+# Monitoring (required for production)
+# alarm_email = "production-alerts@slopstudios.com"

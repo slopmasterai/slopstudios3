@@ -1,0 +1,90 @@
+# ===========================================
+# Slop Studios 3 - Code Owners
+# ===========================================
+# These owners will be requested for review when
+# someone opens a pull request that modifies
+# code that they own.
+#
+# Documentation: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+*                           @slopstudios/maintainers
+
+# ===========================================
+# Source Code
+# ===========================================
+
+# Core application code
+/src/                       @slopstudios/core-team
+
+# Components
+/src/components/            @slopstudios/frontend-team
+
+# Services and business logic
+/src/services/              @slopstudios/backend-team
+
+# Type definitions
+/src/types/                 @slopstudios/core-team
+
+# Utilities
+/src/utils/                 @slopstudios/core-team
+
+# ===========================================
+# Tests
+# ===========================================
+
+/tests/                     @slopstudios/qa-team
+
+# ===========================================
+# Configuration Files
+# ===========================================
+
+# Build and package configuration
+package.json                @slopstudios/maintainers
+package-lock.json           @slopstudios/maintainers
+tsconfig.json               @slopstudios/core-team
+
+# Linting and formatting
+.eslintrc*                  @slopstudios/core-team
+eslint.config.js            @slopstudios/core-team
+.prettierrc*                @slopstudios/core-team
+
+# Testing configuration
+jest.config.*               @slopstudios/qa-team
+
+# ===========================================
+# Infrastructure
+# ===========================================
+
+# Docker
+Dockerfile*                 @slopstudios/devops-team
+docker-compose*.yml         @slopstudios/devops-team
+.dockerignore               @slopstudios/devops-team
+
+# Terraform
+/infrastructure/terraform/  @slopstudios/devops-team
+
+# Nginx configuration
+/infrastructure/docker/nginx.conf  @slopstudios/devops-team
+
+# ===========================================
+# CI/CD
+# ===========================================
+
+/.github/workflows/         @slopstudios/devops-team
+/.github/dependabot.yml     @slopstudios/devops-team
+
+# ===========================================
+# Documentation
+# ===========================================
+
+/docs/                      @slopstudios/documentation-team
+README.md                   @slopstudios/maintainers
+CONTRIBUTING.md             @slopstudios/maintainers
+CHANGELOG.md                @slopstudios/maintainers
+
+# ===========================================
+# Security
+# ===========================================
+
+/.github/SECURITY.md        @slopstudios/security-team

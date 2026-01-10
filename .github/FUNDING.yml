@@ -1,0 +1,17 @@
+# ===========================================
+# Slop Studios 3 - Funding Configuration
+# ===========================================
+# These are supported funding model platforms
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+
+github: [slopstudios]
+# patreon: slopstudios
+# open_collective: slopstudios
+# ko_fi: slopstudios
+# tidelift: npm/slopstudios3
+# community_bridge: slopstudios3
+# liberapay: slopstudios
+# issuehunt: slopstudios
+# otechie: slopstudios
+# lfx_crowdfunding: slopstudios3
+# custom: ["https://www.slopstudios.com/donate"]

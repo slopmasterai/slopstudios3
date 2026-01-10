@@ -1,0 +1,79 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Dependencies
+node_modules
+
+# Build outputs
+dist
+build
+out
+
+# IDE and editor
+.idea
+.vscode
+*.swp
+*.swo
+
+# Test and coverage
+coverage
+.nyc_output
+*.lcov
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Environment files (these should be injected at runtime)
+.env
+.env.*
+!.env.example
+
+# Documentation
+docs
+*.md
+!README.md
+
+# CI/CD
+.github
+.gitlab-ci.yml
+
+# Infrastructure
+infrastructure
+terraform
+.terraform
+
+# Docker
+Dockerfile*
+docker-compose*
+.docker
+
+# Development files
+tests
+__tests__
+*.test.ts
+*.spec.ts
+
+# Misc
+.DS_Store
+Thumbs.db
+*.bak
+tmp
+temp
+
+# TypeScript source maps in production
+*.map
+
+# Husky
+.husky
+
+# Config files not needed in container
+.editorconfig
+.eslintrc*
+.prettierrc*
+.nvmrc
+.tool-versions
+jest.config.*

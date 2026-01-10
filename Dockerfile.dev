@@ -1,0 +1,31 @@
+# ===========================================
+# Slop Studios 3 - Development Dockerfile
+# ===========================================
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install development dependencies
+RUN apk add --no-cache \
+    git \
+    bash \
+    curl
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Install all dependencies
+RUN npm install
+
+# Copy source code (will be overwritten by volume mount in development)
+COPY . .
+
+# Expose port
+EXPOSE 3000
+
+# Enable hot-reloading
+ENV CHOKIDAR_USEPOLLING=true
+
+# Start development server
+CMD ["npm", "run", "dev"]

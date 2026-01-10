@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.nuxt/
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Package locks
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Generated files
+*.min.js
+*.min.css
+*.d.ts
+
+# Cache
+.cache/
+.tmp/
+.temp/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Infrastructure
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Docker
+.docker/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation build output
+docs/_build/
+site/
