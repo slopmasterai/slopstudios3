@@ -65,7 +65,8 @@ The backend is built using a modern Node.js stack with:
 ### HTTP Request Flow
 
 1. **Request Received** - Fastify receives the incoming HTTP request
-2. **Request ID Generation** - A unique request ID is generated using `generateRequestId()`
+2. **Request ID Generation** - A unique request ID is generated using
+   `generateRequestId()`
 3. **Security Headers** - Helmet adds security headers (CSP, HSTS, etc.)
 4. **CORS Validation** - CORS headers are validated/added
 5. **Cookie Parsing** - Cookies are parsed and made available
@@ -125,7 +126,8 @@ Client Request
 3. **Connection Middleware** - Request ID assigned, initial validation
 4. **Welcome Event** - Server sends welcome message with connection info
 5. **Handler Registration** - Event handlers attached to socket
-6. **Authentication** (optional) - Client can authenticate via `authenticate` event
+6. **Authentication** (optional) - Client can authenticate via `authenticate`
+   event
 7. **Event Loop** - Socket ready to send/receive events
 
 ## Session Management
@@ -148,6 +150,7 @@ TTL: Configurable (default 24 hours)
 ```
 
 User session index:
+
 ```
 Key: session:user:{userId}
 Value: Set of session IDs
@@ -197,14 +200,14 @@ interface ApiResponse<T> {
 
 ### Error Codes
 
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `BAD_REQUEST` | 400 | Invalid request data |
-| `UNAUTHORIZED` | 401 | Authentication required |
-| `FORBIDDEN` | 403 | Insufficient permissions |
-| `NOT_FOUND` | 404 | Resource not found |
-| `RATE_LIMIT_EXCEEDED` | 429 | Too many requests |
-| `INTERNAL_ERROR` | 500 | Server error |
+| Code                  | HTTP Status | Description              |
+| --------------------- | ----------- | ------------------------ |
+| `BAD_REQUEST`         | 400         | Invalid request data     |
+| `UNAUTHORIZED`        | 401         | Authentication required  |
+| `FORBIDDEN`           | 403         | Insufficient permissions |
+| `NOT_FOUND`           | 404         | Resource not found       |
+| `RATE_LIMIT_EXCEEDED` | 429         | Too many requests        |
+| `INTERNAL_ERROR`      | 500         | Server error             |
 
 ## File Structure
 
@@ -244,20 +247,20 @@ src/
 
 Configuration is loaded from environment variables:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NODE_ENV` | development | Environment mode |
-| `PORT` | 3000 | HTTP server port |
-| `HOST` | 0.0.0.0 | Server host |
-| `LOG_LEVEL` | info | Logging level |
-| `REDIS_URL` | redis://localhost:6379 | Redis connection URL |
-| `JWT_SECRET` | (required) | JWT signing secret |
-| `JWT_EXPIRES_IN` | 7d | JWT expiration |
-| `APP_SECRET` | (required) | Session encryption secret |
-| `SESSION_TTL` | 86400 | Session TTL in seconds |
-| `CORS_ORIGIN` | http://localhost:3000 | Allowed CORS origins |
-| `RATE_LIMIT_MAX_REQUESTS` | 100 | Max requests per window |
-| `RATE_LIMIT_WINDOW_MS` | 900000 | Rate limit window (15 min) |
+| Variable                  | Default                | Description                |
+| ------------------------- | ---------------------- | -------------------------- |
+| `NODE_ENV`                | development            | Environment mode           |
+| `PORT`                    | 3000                   | HTTP server port           |
+| `HOST`                    | 0.0.0.0                | Server host                |
+| `LOG_LEVEL`               | info                   | Logging level              |
+| `REDIS_URL`               | redis://localhost:6379 | Redis connection URL       |
+| `JWT_SECRET`              | (required)             | JWT signing secret         |
+| `JWT_EXPIRES_IN`          | 7d                     | JWT expiration             |
+| `APP_SECRET`              | (required)             | Session encryption secret  |
+| `SESSION_TTL`             | 86400                  | Session TTL in seconds     |
+| `CORS_ORIGIN`             | http://localhost:3000  | Allowed CORS origins       |
+| `RATE_LIMIT_MAX_REQUESTS` | 100                    | Max requests per window    |
+| `RATE_LIMIT_WINDOW_MS`    | 900000                 | Rate limit window (15 min) |
 
 ## Graceful Shutdown
 

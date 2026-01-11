@@ -3,6 +3,9 @@
  * Handles client connections, disconnections, and connection tracking
  */
 
+/* eslint-disable @typescript-eslint/strict-boolean-expressions */
+/* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
+
 import { logger } from '../../utils/logger.js';
 
 import type {
@@ -13,7 +16,12 @@ import type {
 } from '../../types/websocket.types.js';
 import type { Socket } from 'socket.io';
 
-type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+type TypedSocket = Socket<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  InterServerEvents,
+  SocketData
+>;
 
 export function registerConnectionHandler(socket: TypedSocket): void {
   const requestId = socket.data.requestId || 'unknown';
@@ -59,7 +67,10 @@ export function registerConnectionHandler(socket: TypedSocket): void {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error({ socketId: socket.id, requestId, room: roomName, error: errorMessage }, 'Failed to join room');
+      logger.error(
+        { socketId: socket.id, requestId, room: roomName, error: errorMessage },
+        'Failed to join room'
+      );
 
       if (typeof callback === 'function') {
         callback({ success: false, error: errorMessage });
@@ -81,7 +92,10 @@ export function registerConnectionHandler(socket: TypedSocket): void {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error({ socketId: socket.id, requestId, room: roomName, error: errorMessage }, 'Failed to leave room');
+      logger.error(
+        { socketId: socket.id, requestId, room: roomName, error: errorMessage },
+        'Failed to leave room'
+      );
 
       if (typeof callback === 'function') {
         callback({ success: false, error: errorMessage });

@@ -3,6 +3,9 @@
  * JWT authentication middleware for protected routes
  */
 
+/* eslint-disable @typescript-eslint/strict-boolean-expressions */
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+
 import { timestamp, generateRequestId } from '../utils/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -13,10 +16,7 @@ import type { FastifyRequest, FastifyReply, FastifyInstance } from 'fastify';
 /**
  * Verifies JWT token and attaches user to request
  */
-export async function verifyJWT(
-  request: FastifyRequest,
-  reply: FastifyReply
-): Promise<void> {
+export async function verifyJWT(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   try {
     // jwtVerify is added by @fastify/jwt plugin
     await request.jwtVerify();
@@ -51,10 +51,7 @@ export async function verifyJWT(
 /**
  * Optional JWT verification - doesn't fail if no token
  */
-export async function optionalJWT(
-  request: FastifyRequest,
-  _reply: FastifyReply
-): Promise<void> {
+export async function optionalJWT(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
   try {
     const authHeader = request.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) {
@@ -76,7 +73,7 @@ export function createAuthDecorator(app: FastifyInstance): void {
   // Add authentication hook
   app.addHook('preHandler', async (request) => {
     // Skip if user already set (e.g., from session)
-    if (request.user) {
+    if (request.user !== undefined && request.user !== null) {
       return;
     }
 
@@ -84,10 +81,14 @@ export function createAuthDecorator(app: FastifyInstance): void {
     try {
       const authHeader = request.headers.authorization;
       if (authHeader?.startsWith('Bearer ')) {
-        const decoded = await request.jwtVerify<{ userId: string; email?: string; roles?: string[] }>();
+        const decoded = await request.jwtVerify<{
+          userId: string;
+          email?: string;
+          roles?: string[];
+        }>();
 
         request.user = {
-          id: decoded.userId || (decoded as unknown as { sub?: string }).sub || '',
+          id: decoded.userId ?? (decoded as unknown as { sub?: string }).sub ?? '',
           email: decoded.email,
           roles: decoded.roles,
         };
@@ -130,7 +131,7 @@ export function requireRoles(...requiredRoles: string[]) {
       return;
     }
 
-    const userRoles = user.roles || [];
+    const userRoles = user.roles ?? [];
     const hasRequiredRole = requiredRoles.some((role) => userRoles.includes(role));
 
     if (!hasRequiredRole) {

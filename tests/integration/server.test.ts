@@ -2,59 +2,106 @@
  * HTTP Server Integration Tests
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 
-// Mock Redis before importing server modules
+// Create mock Redis instance
+const mockRedisInstance = {
+  connect: jest.fn().mockResolvedValue(undefined),
+  quit: jest.fn().mockResolvedValue(undefined),
+  disconnect: jest.fn(),
+  ping: jest.fn().mockResolvedValue('PONG'),
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue('OK'),
+  setex: jest.fn().mockResolvedValue('OK'),
+  del: jest.fn().mockResolvedValue(1),
+  expire: jest.fn().mockResolvedValue(1),
+  ttl: jest.fn().mockResolvedValue(86400),
+  sadd: jest.fn().mockResolvedValue(1),
+  smembers: jest.fn().mockResolvedValue([]),
+  srem: jest.fn().mockResolvedValue(1),
+  zremrangebyscore: jest.fn().mockResolvedValue(0),
+  zcard: jest.fn().mockResolvedValue(0),
+  zadd: jest.fn().mockResolvedValue(1),
+  pexpire: jest.fn().mockResolvedValue(1),
+  incr: jest.fn().mockResolvedValue(1),
+  multi: jest.fn().mockReturnValue({
+    zremrangebyscore: jest.fn().mockReturnThis(),
+    zcard: jest.fn().mockReturnThis(),
+    zadd: jest.fn().mockReturnThis(),
+    pexpire: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue([
+      [null, 0],
+      [null, 0],
+      [null, 1],
+      [null, 1],
+    ]),
+  }),
+  defineCommand: jest.fn(),
+  rateLimit: jest.fn().mockResolvedValue([1, 60000]),
+  on: jest.fn(),
+  status: 'ready',
+};
+
+// Mock ioredis - must use named export
 jest.mock('ioredis', () => {
-  const RedisMock = jest.fn().mockImplementation(() => ({
-    connect: jest.fn().mockResolvedValue(undefined),
-    quit: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn(),
-    ping: jest.fn().mockResolvedValue('PONG'),
-    get: jest.fn().mockResolvedValue(null),
-    set: jest.fn().mockResolvedValue('OK'),
-    setex: jest.fn().mockResolvedValue('OK'),
-    del: jest.fn().mockResolvedValue(1),
-    expire: jest.fn().mockResolvedValue(1),
-    ttl: jest.fn().mockResolvedValue(86400),
-    sadd: jest.fn().mockResolvedValue(1),
-    smembers: jest.fn().mockResolvedValue([]),
-    srem: jest.fn().mockResolvedValue(1),
-    zremrangebyscore: jest.fn().mockResolvedValue(0),
-    zcard: jest.fn().mockResolvedValue(0),
-    zadd: jest.fn().mockResolvedValue(1),
-    pexpire: jest.fn().mockResolvedValue(1),
-    multi: jest.fn().mockReturnValue({
-      zremrangebyscore: jest.fn().mockReturnThis(),
-      zcard: jest.fn().mockReturnThis(),
-      zadd: jest.fn().mockReturnThis(),
-      pexpire: jest.fn().mockReturnThis(),
-      exec: jest.fn().mockResolvedValue([[null, 0], [null, 0], [null, 1], [null, 1]]),
+  return {
+    Redis: jest.fn().mockImplementation(() => mockRedisInstance),
+  };
+});
+
+// Mock redis service directly for more reliable testing
+jest.mock('../../src/services/redis.service.js', () => ({
+  createRedisClient: jest.fn(() => mockRedisInstance),
+  connectRedis: jest.fn().mockResolvedValue(undefined),
+  disconnectRedis: jest.fn().mockResolvedValue(undefined),
+  getRedisClient: jest.fn(() => mockRedisInstance),
+  isRedisConnected: jest.fn(() => true),
+  healthCheck: jest.fn().mockResolvedValue({ healthy: true, latency: 1 }),
+}));
+
+// Mock @fastify/rate-limit to use local store instead of Redis
+jest.mock('@fastify/rate-limit', () => {
+  return {
+    __esModule: true,
+    default: jest.fn().mockImplementation(async (fastify) => {
+      // Use a simple in-memory rate limiter for tests
+      fastify.addHook('onRequest', async () => {
+        // No-op rate limiter for tests
+      });
     }),
-    on: jest.fn(),
-    status: 'ready',
-  }));
-  return RedisMock;
+  };
+});
+
+// Mock connect-redis to avoid Redis store issues
+jest.mock('connect-redis', () => {
+  return {
+    RedisStore: jest.fn().mockImplementation(() => ({
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue(undefined),
+      destroy: jest.fn().mockResolvedValue(undefined),
+      touch: jest.fn().mockResolvedValue(undefined),
+    })),
+  };
 });
 
 // Set environment variables before imports
 process.env['NODE_ENV'] = 'test';
-process.env['PORT'] = '0'; // Use random available port
+process.env['PORT'] = '3999'; // Use a valid test port
 process.env['HOST'] = '127.0.0.1';
 process.env['REDIS_URL'] = 'redis://localhost:6379';
-process.env['JWT_SECRET'] = 'test-jwt-secret';
-process.env['APP_SECRET'] = 'test-app-secret';
+process.env['JWT_SECRET'] = 'test-jwt-secret-key-that-is-long-enough-32chars';
+process.env['APP_SECRET'] = 'test-app-secret-key-that-is-long-enough-32chars';
 
 describe('HTTP Server', () => {
-  let app: Awaited<ReturnType<typeof import('../../src/server/http.server.js')['createHttpServer']>>;
+  let app: Awaited<
+    ReturnType<(typeof import('../../src/server/http.server.js'))['createHttpServer']>
+  >;
 
   beforeAll(async () => {
     // Import after mocks are set up
-    const { createRedisClient } = await import('../../src/services/redis.service.js');
     const { createHttpServer } = await import('../../src/server/http.server.js');
     const { registerHealthRoutes } = await import('../../src/routes/health.routes.js');
 
-    createRedisClient();
     app = await createHttpServer();
     await registerHealthRoutes(app);
     await app.listen({ port: 0, host: '127.0.0.1' });
@@ -147,7 +194,7 @@ describe('HTTP Server', () => {
         method: 'OPTIONS',
         url: '/health',
         headers: {
-          'Origin': 'http://localhost:3000',
+          Origin: 'http://localhost:3000',
           'Access-Control-Request-Method': 'GET',
         },
       });

@@ -109,6 +109,10 @@ slopstudios3/
 | `CLAUDE_ENABLE_QUEUE`             | Enable request queuing when at capacity | No       | `true`                  |
 | `CLAUDE_MAX_QUEUE_SIZE`           | Max requests to queue before rejecting  | No       | `100`                   |
 | `CLAUDE_USE_API_FALLBACK`         | Use Anthropic API when CLI unavailable  | No       | `true`                  |
+| `STRUDEL_MAX_CONCURRENT_RENDERS`  | Max concurrent audio renders            | No       | `3`                     |
+| `STRUDEL_RENDER_TIMEOUT_MS`       | Timeout for audio rendering in ms       | No       | `120000`                |
+| `STRUDEL_MAX_PATTERN_LENGTH`      | Max pattern code length in chars        | No       | `100000`                |
+| `STRUDEL_MAX_RENDER_DURATION`     | Max audio duration in seconds           | No       | `600`                   |
 
 See `.env.example` for a complete list of environment variables.
 
@@ -147,6 +151,46 @@ curl http://localhost:3000/api/v1/claude/health
 See [Claude Integration Documentation](docs/backend/claude-integration.md) for
 details.
 
+## Strudel Live Coding Integration
+
+The platform includes live coding music features through Strudel integration:
+
+### Features
+
+- **Pattern Validation**: Syntax checking using JavaScript parsing
+- **Audio Rendering**: Generate audio files from Strudel patterns
+- **REST API**: Execute patterns via HTTP at `/api/v1/strudel/*`
+- **WebSocket Streaming**: Real-time progress via Socket.IO
+- **Multiple Formats**: WAV, MP3, OGG, FLAC output (WAV currently implemented)
+
+### Example
+
+```javascript
+// Validate a pattern
+curl -X POST http://localhost:3000/api/v1/strudel/validate \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "note(\"c3 e3 g3\").s(\"sawtooth\")"}'
+
+// Execute and render audio
+curl -X POST http://localhost:3000/api/v1/strudel/execute \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "s(\"bd sd hh sd\").gain(0.8)",
+    "options": { "duration": 10 }
+  }'
+```
+
+### Health Check
+
+```bash
+curl http://localhost:3000/api/v1/strudel/health
+```
+
+See [Strudel Integration Documentation](docs/backend/strudel-integration.md) for
+details.
+
 ## Development
 
 ### Code Style
@@ -181,6 +225,8 @@ npm run test:watch
 - [Changelog](CHANGELOG.md)
 - [Architecture Decision Records](docs/adr/)
 - [API Documentation](docs/api/)
+- [Claude Integration](docs/backend/claude-integration.md)
+- [Strudel Integration](docs/backend/strudel-integration.md)
 
 ## Deployment
 

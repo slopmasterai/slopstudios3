@@ -7,6 +7,7 @@ import { registerAuthHandler } from './auth.handler.js';
 import { registerClaudeHandler } from './claude.handler.js';
 import { registerConnectionHandler } from './connection.handler.js';
 import { registerHeartbeatHandler } from './heartbeat.handler.js';
+import { registerStrudelHandler } from './strudel.handler.js';
 
 import type {
   ServerToClientEvents,
@@ -31,11 +32,13 @@ export function registerAllHandlers(socket: TypedSocket): void {
   registerAuthHandler(socket);
   registerHeartbeatHandler(socket);
   registerClaudeHandler(socket);
+  registerStrudelHandler(socket);
 }
 
 export { registerConnectionHandler } from './connection.handler.js';
 export { registerAuthHandler } from './auth.handler.js';
 export { registerClaudeHandler } from './claude.handler.js';
+export { registerStrudelHandler } from './strudel.handler.js';
 export {
   registerHeartbeatHandler,
   getLastActivity,

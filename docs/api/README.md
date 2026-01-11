@@ -82,12 +82,12 @@ API requests are rate limited. See response headers:
 
 Different endpoints have different rate limits:
 
-| Endpoint Group | Limit | Window |
-|---------------|-------|--------|
-| Default | 100 requests | 15 minutes |
-| Authentication | 10 requests | 1 minute |
-| Uploads | 50 requests | 1 hour |
-| Heavy operations | 5 requests | 1 minute |
+| Endpoint Group   | Limit        | Window     |
+| ---------------- | ------------ | ---------- |
+| Default          | 100 requests | 15 minutes |
+| Authentication   | 10 requests  | 1 minute   |
+| Uploads          | 50 requests  | 1 hour     |
+| Heavy operations | 5 requests   | 1 minute   |
 
 ## Health Check Endpoints
 
@@ -100,6 +100,7 @@ curl http://localhost:3000/health
 ```
 
 Response:
+
 ```json
 {
   "success": true,
@@ -120,6 +121,7 @@ curl http://localhost:3000/health/ready
 ```
 
 Response:
+
 ```json
 {
   "success": true,
@@ -159,11 +161,12 @@ ws://localhost:3000/notifications
 
 ```javascript
 const socket = io('ws://localhost:3000', {
-  auth: { token: 'your-jwt-token' }
+  auth: { token: 'your-jwt-token' },
 });
 ```
 
-See [WebSocket Events Documentation](../backend/websocket-events.md) for full event reference.
+See [WebSocket Events Documentation](../backend/websocket-events.md) for full
+event reference.
 
 ## Session Management
 
@@ -182,10 +185,10 @@ Sessions can be managed via:
 
 ### Session Configuration
 
-| Setting | Default | Description |
-|---------|---------|-------------|
+| Setting       | Default     | Description                     |
+| ------------- | ----------- | ------------------------------- |
 | `SESSION_TTL` | 86400 (24h) | Session time-to-live in seconds |
-| `APP_SECRET` | (required) | Secret for session encryption |
+| `APP_SECRET`  | (required)  | Secret for session encryption   |
 
 ## Authentication Flow
 

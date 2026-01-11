@@ -14,14 +14,16 @@
 - Phase 10: :white_check_mark: Complete
 - Phase 11: :white_check_mark: Complete
 - Phase 12: :white_check_mark: Complete
+- Phase 13: :white_check_mark: Complete
 
 ## Current Status
 
-**Status**: Claude CLI integration complete - Ready for AI-powered features
+**Status**: Strudel integration complete - Ready for live coding music features
 
-Infrastructure, backend core, and Claude CLI integration are complete. The
-server provides HTTP APIs, WebSocket real-time communication, Redis-backed
-session management, and Claude CLI wrapper for AI operations.
+Infrastructure, backend core, Claude CLI integration, and Strudel live coding
+music integration are complete. The server provides HTTP APIs, WebSocket
+real-time communication, Redis-backed session management, Claude CLI wrapper for
+AI operations, and Strudel pattern validation and audio rendering.
 
 ## Phase Summary
 
@@ -39,6 +41,7 @@ session management, and Claude CLI wrapper for AI operations.
 | 10    | Resilience             | 2024-01-10 | [phase-10-status.md](./phase-10-status.md) | [phase-10-handoff.md](./phase-10-handoff.md) |
 | 11    | Backend Core           | 2026-01-10 | [phase-11-status.md](./phase-11-status.md) | [phase-11-handoff.md](./phase-11-handoff.md) |
 | 12    | Claude CLI Wrapper     | 2026-01-10 | [phase-12-status.md](./phase-12-status.md) | [phase-12-handoff.md](./phase-12-handoff.md) |
+| 13    | Strudel Integration    | 2026-01-10 | [phase-13-status.md](./phase-13-status.md) | [phase-13-handoff.md](./phase-13-handoff.md) |
 
 ## Quick Links
 
@@ -68,6 +71,96 @@ session management, and Claude CLI wrapper for AI operations.
 | Cache/Sessions   | Redis          | 7       |
 | Logging          | Pino           | 9.x     |
 | AI Integration   | Anthropic SDK  | Latest  |
+| Live Coding      | Strudel        | 1.1.x   |
+
+## Phase 13: Strudel Integration
+
+**Completed**: 2026-01-10
+
+### Overview
+
+Phase 13 implements Strudel live coding music integration, enabling pattern
+validation and audio rendering through both REST API and WebSocket interfaces.
+
+### Completed Items
+
+#### Strudel Core Integration
+
+- [x] Strudel service (`src/services/strudel.service.ts`)
+- [x] Strudel metrics service (`src/services/strudel-metrics.service.ts`)
+- [x] Strudel types definitions (`src/types/strudel.types.ts`)
+- [x] Pattern validation with Acorn parser
+- [x] Mock audio rendering with WAV export
+
+#### REST API Endpoints
+
+- [x] POST `/api/v1/strudel/validate` - Validate pattern syntax
+- [x] POST `/api/v1/strudel/execute` - Execute pattern synchronously
+- [x] POST `/api/v1/strudel/execute/async` - Execute pattern asynchronously
+- [x] GET `/api/v1/strudel/processes/:id` - Get process status
+- [x] DELETE `/api/v1/strudel/processes/:id` - Cancel rendering process
+- [x] GET `/api/v1/strudel/processes` - List user's processes
+- [x] GET `/api/v1/strudel/metrics` - Get metrics data
+- [x] GET `/api/v1/strudel/health` - Health check endpoint
+
+#### WebSocket Handlers
+
+- [x] Real-time pattern validation and rendering
+- [x] `strudel:validate` event handler (client→server)
+- [x] `strudel:execute` event handler (client→server)
+- [x] `strudel:status` event handler (client→server)
+- [x] `strudel:cancel` event handler (client→server)
+- [x] `strudel:validated` event (server→client)
+- [x] `strudel:queued` event (server→client)
+- [x] `strudel:progress` event (server→client)
+- [x] `strudel:complete` event (server→client)
+- [x] `strudel:error` event (server→client)
+
+#### Render Queue Management
+
+- [x] Render queue with configurable concurrency
+- [x] Lifecycle tracking (pending, queued, validating, rendering, complete,
+      failed, cancelled)
+- [x] Graceful shutdown with process cleanup
+- [x] Timeout handling
+
+#### Metrics & Monitoring
+
+- [x] Validation timing and success/failure tracking
+- [x] Render timing and audio duration metrics
+- [x] Queue depth monitoring
+- [x] Percentile calculations (p50, p95, p99)
+
+#### Architecture Decision
+
+- [x] ADR-0005: Strudel Integration (`docs/adr/0005-strudel-integration.md`)
+
+### Dependencies Added
+
+- `@strudel/core` - Core Strudel functionality
+- `@strudel/transpiler` - Pattern transpilation
+- `@strudel/webaudio` - Web Audio integration (future use)
+- `@strudel/mini` - Mini-notation support
+- `acorn` - JavaScript parser for validation
+- `escodegen` - Code generation utilities
+
+### Documentation
+
+- [x] Phase 13 status document (`docs/phase-13-status.md`)
+- [x] Phase 13 handoff document (`docs/phase-13-handoff.md`)
+- [x] Strudel API documentation (`docs/api/strudel-endpoints.md`)
+- [x] Strudel integration guide (`docs/backend/strudel-integration.md`)
+- [x] WebSocket events updated (`docs/backend/websocket-events.md`)
+
+### Tests
+
+- [x] Unit tests for Strudel service (`tests/unit/strudel.service.test.ts`)
+- [x] Unit tests for metrics (`tests/unit/strudel-metrics.service.test.ts`)
+- [x] Integration tests (`tests/integration/strudel.test.ts`)
+- [x] WebSocket tests (`tests/integration/strudel-websocket.test.ts`)
+- [x] Test fixtures (`tests/helpers/strudel-fixtures.ts`)
+
+---
 
 ## Phase 12: Claude CLI Wrapper
 
@@ -222,14 +315,15 @@ enabling AI-powered features through both the Claude CLI and Anthropic SDK.
 
 ## Next Steps
 
-With Claude CLI integration complete, the project is ready for:
+With Strudel integration complete, the project is ready for:
 
-1. **Database Integration** - Connect PostgreSQL with Prisma or Drizzle ORM
-2. **User Management** - Implement registration, profiles, password reset
-3. **Media API** - Build endpoints for media upload and generation using Claude
-4. **Frontend Development** - Create user interface with real-time AI streaming
-5. **AI-Powered Features** - Implement media generation workflows
-6. **Performance Testing** - Establish performance baselines for AI operations
+1. **Real Audio Rendering** - Implement actual Strudel synthesis in Worker
+2. **Sample Support** - Add sample loading and playback
+3. **Format Conversion** - Add MP3, OGG, FLAC export
+4. **Database Integration** - Connect PostgreSQL with Prisma or Drizzle ORM
+5. **User Management** - Implement registration, profiles, password reset
+6. **Frontend Development** - Create user interface with real-time streaming
+7. **AI-Powered Music** - Claude-generated Strudel patterns
 
 ## Maintenance Notes
 

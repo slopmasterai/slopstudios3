@@ -49,6 +49,16 @@ export interface ServerConfig extends Config {
     maxRetries: number;
     retryDelayMs: number;
   };
+  strudel: {
+    maxConcurrentRenders: number;
+    renderTimeoutMs: number;
+    maxPatternLength: number;
+    maxRenderDuration: number;
+    defaultSampleRate: number;
+    enableQueue: boolean;
+    maxQueueSize: number;
+    audioFormats: string[];
+  };
 }
 
 function getEnvString(key: string, defaultValue?: string): string {
@@ -178,6 +188,16 @@ function loadConfig(): ServerConfig {
       useApiFallback: getEnvBoolean('CLAUDE_USE_API_FALLBACK', true),
       maxRetries: getEnvNumber('CLAUDE_MAX_RETRIES', 3),
       retryDelayMs: getEnvNumber('CLAUDE_RETRY_DELAY_MS', 1000),
+    },
+    strudel: {
+      maxConcurrentRenders: getEnvNumber('STRUDEL_MAX_CONCURRENT_RENDERS', 3),
+      renderTimeoutMs: getEnvNumber('STRUDEL_RENDER_TIMEOUT_MS', 120000),
+      maxPatternLength: getEnvNumber('STRUDEL_MAX_PATTERN_LENGTH', 100000),
+      maxRenderDuration: getEnvNumber('STRUDEL_MAX_RENDER_DURATION', 600),
+      defaultSampleRate: getEnvNumber('STRUDEL_DEFAULT_SAMPLE_RATE', 44100),
+      enableQueue: getEnvBoolean('STRUDEL_ENABLE_QUEUE', true),
+      maxQueueSize: getEnvNumber('STRUDEL_MAX_QUEUE_SIZE', 50),
+      audioFormats: getEnvString('STRUDEL_AUDIO_FORMATS', 'wav').split(','),
     },
   };
 

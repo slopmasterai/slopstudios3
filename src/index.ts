@@ -7,6 +7,7 @@ import { serverConfig } from './config/server.config.js';
 import { registerAuthRoutes } from './routes/auth.routes.js';
 import { registerClaudeRoutes } from './routes/claude.routes.js';
 import { registerHealthRoutes } from './routes/health.routes.js';
+import { registerStrudelRoutes } from './routes/strudel.routes.js';
 import {
   createHttpServer,
   startHttpServer,
@@ -25,6 +26,15 @@ import {
   cleanupZombieProcesses,
 } from './services/process-manager.service.js';
 import { createRedisClient, connectRedis, disconnectRedis } from './services/redis.service.js';
+import {
+  initializeStrudelMetricsService,
+  shutdownStrudelMetricsService,
+} from './services/strudel-metrics.service.js';
+import {
+  initializeStrudelService,
+  shutdownStrudelService,
+  stopQueueWorker as stopStrudelQueueWorker,
+} from './services/strudel.service.js';
 import { logger } from './utils/logger.js';
 import { registerAllHandlers } from './websocket/handlers/index.js';
 
@@ -49,18 +59,27 @@ async function shutdown(signal: string): Promise<void> {
     logger.info('Stopping Claude queue worker...');
     stopQueueWorker();
 
+    // Stop Strudel queue worker
+    logger.info('Stopping Strudel queue worker...');
+    stopStrudelQueueWorker();
+
     // Terminate all running Claude processes
     logger.info('Terminating Claude processes...');
     const terminated = await terminateAllProcesses();
     logger.info({ terminated }, 'Claude processes terminated');
 
+    // Shutdown Strudel service
+    logger.info('Shutting down Strudel service...');
+    await shutdownStrudelService();
+
     // Wait for in-flight processes to complete (with timeout)
     logger.info('Waiting for in-flight processes...');
     await waitForProcesses(10000);
 
-    // Shutdown metrics service
-    logger.info('Shutting down metrics service...');
+    // Shutdown metrics services
+    logger.info('Shutting down metrics services...');
     await shutdownMetricsService();
+    await shutdownStrudelMetricsService();
 
     // Close WebSocket connections
     logger.info('Closing WebSocket server...');
@@ -130,23 +149,44 @@ async function main(): Promise<void> {
     logger.info('Registering Claude routes...');
     registerClaudeRoutes(app);
 
-    // 8. Cleanup zombie processes (from previous runs)
+    // 8. Initialize Strudel service
+    logger.info('Initializing Strudel service...');
+    await initializeStrudelService({
+      maxConcurrentRenders: serverConfig.strudel.maxConcurrentRenders,
+      renderTimeoutMs: serverConfig.strudel.renderTimeoutMs,
+      maxPatternLength: serverConfig.strudel.maxPatternLength,
+      maxRenderDuration: serverConfig.strudel.maxRenderDuration,
+      defaultSampleRate: serverConfig.strudel.defaultSampleRate,
+      enableQueue: serverConfig.strudel.enableQueue,
+      maxQueueSize: serverConfig.strudel.maxQueueSize,
+      audioFormats: serverConfig.strudel.audioFormats,
+    });
+
+    // 9. Initialize Strudel metrics service
+    logger.info('Initializing Strudel metrics service...');
+    initializeStrudelMetricsService();
+
+    // 10. Register Strudel routes
+    logger.info('Registering Strudel routes...');
+    registerStrudelRoutes(app);
+
+    // 11. Cleanup zombie processes (from previous runs)
     logger.info('Cleaning up zombie processes...');
     const zombiesCleanedUp = await cleanupZombieProcesses();
     if (zombiesCleanedUp > 0) {
       logger.info({ count: zombiesCleanedUp }, 'Cleaned up zombie processes');
     }
 
-    // 9. Start HTTP server
+    // 12. Start HTTP server
     logger.info('Starting HTTP server...');
     await startHttpServer();
 
-    // 10. Create WebSocket server
+    // 13. Create WebSocket server
     logger.info('Creating WebSocket server...');
     const httpServer = getHttpServer().server;
     const io = createWebSocketServer(httpServer);
 
-    // 11. Register WebSocket handlers
+    // 14. Register WebSocket handlers
     logger.info('Registering WebSocket handlers...');
     io.on('connection', (socket) => {
       registerAllHandlers(socket);

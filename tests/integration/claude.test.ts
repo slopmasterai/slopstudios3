@@ -47,14 +47,20 @@ jest.mock('../../src/middleware/auth.middleware.js', () => ({
   verifyJWT: jest.fn(
     (
       request: { user: unknown; headers: { authorization?: string } },
-      _reply: unknown,
+      reply: { status: (code: number) => { send: (body: unknown) => void } },
       done: () => void
     ) => {
-      // If authorization header exists, set user
+      // If authorization header exists, set user and continue
       if (request.headers.authorization?.startsWith('Bearer ')) {
         request.user = { id: 'test-user-id', email: 'test@example.com' };
+        done();
+      } else {
+        // No auth header - return 401
+        reply.status(401).send({
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+        });
       }
-      done();
     }
   ),
 }));

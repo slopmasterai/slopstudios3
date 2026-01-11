@@ -3,6 +3,10 @@
  * Handles connection health monitoring and ping/pong events
  */
 
+/* eslint-disable @typescript-eslint/strict-boolean-expressions */
+/* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+
 import { logger } from '../../utils/logger.js';
 
 import type {
@@ -13,7 +17,12 @@ import type {
 } from '../../types/websocket.types.js';
 import type { Socket } from 'socket.io';
 
-type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+type TypedSocket = Socket<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  InterServerEvents,
+  SocketData
+>;
 
 // Track last activity for each socket
 const lastActivityMap = new Map<string, number>();

@@ -3,6 +3,10 @@
  * Initializes IORedis client with reconnection strategy and health checks
  */
 
+/* eslint-disable @typescript-eslint/strict-boolean-expressions */
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+/* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
+
 import { Redis, type RedisOptions } from 'ioredis';
 
 import { serverConfig } from '../config/server.config.js';
@@ -117,7 +121,11 @@ export async function disconnectRedis(): Promise<void> {
   }
 }
 
-export async function healthCheck(): Promise<{ healthy: boolean; latency?: number; error?: string }> {
+export async function healthCheck(): Promise<{
+  healthy: boolean;
+  latency?: number;
+  error?: string;
+}> {
   if (!redisClient || !isConnected) {
     return { healthy: false, error: 'Not connected' };
   }

@@ -3,6 +3,8 @@
  * Centralized error handling and transformation
  */
 
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+
 import { serverConfig } from '../config/server.config.js';
 import { timestamp, generateRequestId } from '../utils/index.js';
 import { logger } from '../utils/logger.js';
@@ -37,31 +39,29 @@ export class AppError extends Error {
  * Common error factories
  */
 export const Errors = {
-  badRequest: (message: string = 'Bad request') =>
+  badRequest: (message: string = 'Bad request'): AppError =>
     new AppError(message, 400, 'BAD_REQUEST'),
 
-  unauthorized: (message: string = 'Unauthorized') =>
+  unauthorized: (message: string = 'Unauthorized'): AppError =>
     new AppError(message, 401, 'UNAUTHORIZED'),
 
-  forbidden: (message: string = 'Forbidden') =>
-    new AppError(message, 403, 'FORBIDDEN'),
+  forbidden: (message: string = 'Forbidden'): AppError => new AppError(message, 403, 'FORBIDDEN'),
 
-  notFound: (message: string = 'Resource not found') =>
+  notFound: (message: string = 'Resource not found'): AppError =>
     new AppError(message, 404, 'NOT_FOUND'),
 
-  conflict: (message: string = 'Conflict') =>
-    new AppError(message, 409, 'CONFLICT'),
+  conflict: (message: string = 'Conflict'): AppError => new AppError(message, 409, 'CONFLICT'),
 
-  unprocessable: (message: string = 'Unprocessable entity') =>
+  unprocessable: (message: string = 'Unprocessable entity'): AppError =>
     new AppError(message, 422, 'UNPROCESSABLE_ENTITY'),
 
-  tooManyRequests: (message: string = 'Too many requests') =>
+  tooManyRequests: (message: string = 'Too many requests'): AppError =>
     new AppError(message, 429, 'RATE_LIMIT_EXCEEDED'),
 
-  internal: (message: string = 'Internal server error') =>
+  internal: (message: string = 'Internal server error'): AppError =>
     new AppError(message, 500, 'INTERNAL_ERROR', false),
 
-  serviceUnavailable: (message: string = 'Service unavailable') =>
+  serviceUnavailable: (message: string = 'Service unavailable'): AppError =>
     new AppError(message, 503, 'SERVICE_UNAVAILABLE'),
 };
 
@@ -117,18 +117,21 @@ export function errorHandler(
     errorMessage = error.message;
   } else if ('statusCode' in error && typeof error.statusCode === 'number') {
     statusCode = error.statusCode;
-    errorCode = (error).code || 'ERROR';
+    errorCode = error.code || 'ERROR';
 
     // Map Fastify error codes
-    if (errorCodeToStatus[(error).code || '']) {
-      statusCode = errorCodeToStatus[(error).code || '']!;
+    const errorCodeKey = error.code ?? '';
+    const mappedStatus = errorCodeToStatus[errorCodeKey];
+    if (mappedStatus !== undefined) {
+      statusCode = mappedStatus;
     }
-    if (errorCodeToMessage[(error).code || '']) {
-      errorMessage = errorCodeToMessage[(error).code || '']!;
+    const mappedMessage = errorCodeToMessage[errorCodeKey];
+    if (mappedMessage !== undefined) {
+      errorMessage = mappedMessage;
     } else if (statusCode < 500) {
       errorMessage = error.message;
     }
-  } else if ('validation' in error && Array.isArray((error).validation)) {
+  } else if ('validation' in error && Array.isArray(error.validation)) {
     statusCode = 400;
     errorCode = 'VALIDATION_ERROR';
     errorMessage = 'Request validation failed';
@@ -141,7 +144,7 @@ export function errorHandler(
     url: request.url,
     statusCode,
     errorCode,
-    userId: request.user?.id,
+    userId: request.user !== undefined ? request.user.id : undefined,
   };
 
   if (statusCode >= 500) {
@@ -155,7 +158,8 @@ export function errorHandler(
     success: false,
     error: {
       code: errorCode,
-      message: isProduction && statusCode >= 500 ? 'An internal server error occurred' : errorMessage,
+      message:
+        isProduction && statusCode >= 500 ? 'An internal server error occurred' : errorMessage,
     },
     meta: {
       timestamp: timestamp(),
@@ -164,8 +168,8 @@ export function errorHandler(
   };
 
   // Add validation details if present and not in production
-  if (!isProduction && 'validation' in error && Array.isArray((error).validation)) {
-    (response.error as { details?: unknown }).details = (error).validation;
+  if (!isProduction && 'validation' in error && Array.isArray(error.validation)) {
+    (response.error as { details?: unknown }).details = error.validation;
   }
 
   reply.status(statusCode).send(response);
@@ -174,10 +178,7 @@ export function errorHandler(
 /**
  * Not found handler
  */
-export function notFoundHandler(
-  request: FastifyRequest,
-  reply: FastifyReply
-): void {
+export function notFoundHandler(request: FastifyRequest, reply: FastifyReply): void {
   const response: ApiResponse<null> = {
     success: false,
     error: {
@@ -196,10 +197,8 @@ export function notFoundHandler(
 /**
  * Async error wrapper for route handlers
  */
-export function asyncHandler<T>(
-  fn: (request: FastifyRequest, reply: FastifyReply) => Promise<T>
-) {
-  return async (request: FastifyRequest, reply: FastifyReply): Promise<T | void> => {
+export function asyncHandler<T>(fn: (request: FastifyRequest, reply: FastifyReply) => Promise<T>) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<T | undefined> => {
     try {
       return await fn(request, reply);
     } catch (error) {

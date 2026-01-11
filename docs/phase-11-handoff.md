@@ -4,8 +4,8 @@
 
 Phase 11 implemented the production-ready backend core for Slop Studios 3 using
 Fastify for HTTP, Socket.IO for WebSockets, and Redis for sessions and rate
-limiting. The server is fully functional with authentication, session management,
-health checks, and real-time communication capabilities.
+limiting. The server is fully functional with authentication, session
+management, health checks, and real-time communication capabilities.
 
 ## What Was Completed
 
@@ -23,18 +23,22 @@ health checks, and real-time communication capabilities.
 
 ## Key Decisions Made
 
-1. **Fastify over Express**: Chosen for superior TypeScript support and performance
+1. **Fastify over Express**: Chosen for superior TypeScript support and
+   performance
 2. **Socket.IO over ws**: Automatic fallback to polling, reconnection support
 3. **Redis Sessions**: Enables horizontal scaling with shared session state
 4. **JWT + Session Auth**: Supports both stateless tokens and stateful sessions
-5. **Mandatory WebSocket Auth**: Connections require valid JWT or session at handshake
-6. **Connection Throttling**: 10 connections per minute per IP/user to prevent abuse
+5. **Mandatory WebSocket Auth**: Connections require valid JWT or session at
+   handshake
+6. **Connection Throttling**: 10 connections per minute per IP/user to prevent
+   abuse
 
 ## Current State
 
 **BACKEND CORE: OPERATIONAL**
 
 The server starts successfully and provides:
+
 - HTTP API at `http://localhost:3000`
 - WebSocket at `ws://localhost:3000`
 - Health endpoints for Kubernetes probes
@@ -84,6 +88,7 @@ The server starts successfully and provides:
 ## Dependencies Added
 
 **Production:**
+
 - `fastify` - HTTP server framework
 - `@fastify/cors`, `@fastify/helmet` - Security
 - `@fastify/rate-limit` - Rate limiting
@@ -99,12 +104,15 @@ The server starts successfully and provides:
 - `@sinclair/typebox` - Schema validation
 
 **Development:**
+
 - `@types/jsonwebtoken` - Type definitions
 
 ## Known Issues & Workarounds
 
-1. **Database Not Connected**: PostgreSQL integration pending. Health check shows `database: not_configured`.
-2. **Auth Routes Basic**: Only login/logout stubs implemented. Full user management pending.
+1. **Database Not Connected**: PostgreSQL integration pending. Health check
+   shows `database: not_configured`.
+2. **Auth Routes Basic**: Only login/logout stubs implemented. Full user
+   management pending.
 
 ## Next Steps
 
@@ -124,23 +132,24 @@ The server starts successfully and provides:
 
 ## Environment Variables
 
-| Variable                  | Required | Default     | Description              |
-| ------------------------- | -------- | ----------- | ------------------------ |
-| `NODE_ENV`                | No       | development | Environment mode         |
-| `PORT`                    | No       | 3000        | Server port              |
-| `HOST`                    | No       | 0.0.0.0     | Server host              |
-| `REDIS_URL`               | Yes      | -           | Redis connection URL     |
-| `JWT_SECRET`              | Yes      | -           | JWT signing secret       |
-| `JWT_EXPIRES_IN`          | No       | 7d          | JWT expiration           |
-| `APP_SECRET`              | Yes      | -           | Session encryption       |
-| `SESSION_TTL`             | No       | 86400       | Session TTL (seconds)    |
-| `CORS_ORIGIN`             | No       | localhost   | Allowed CORS origins     |
-| `RATE_LIMIT_MAX_REQUESTS` | No       | 100         | Requests per window      |
-| `RATE_LIMIT_WINDOW_MS`    | No       | 900000      | Rate limit window (15m)  |
+| Variable                  | Required | Default     | Description             |
+| ------------------------- | -------- | ----------- | ----------------------- |
+| `NODE_ENV`                | No       | development | Environment mode        |
+| `PORT`                    | No       | 3000        | Server port             |
+| `HOST`                    | No       | 0.0.0.0     | Server host             |
+| `REDIS_URL`               | Yes      | -           | Redis connection URL    |
+| `JWT_SECRET`              | Yes      | -           | JWT signing secret      |
+| `JWT_EXPIRES_IN`          | No       | 7d          | JWT expiration          |
+| `APP_SECRET`              | Yes      | -           | Session encryption      |
+| `SESSION_TTL`             | No       | 86400       | Session TTL (seconds)   |
+| `CORS_ORIGIN`             | No       | localhost   | Allowed CORS origins    |
+| `RATE_LIMIT_MAX_REQUESTS` | No       | 100         | Requests per window     |
+| `RATE_LIMIT_WINDOW_MS`    | No       | 900000      | Rate limit window (15m) |
 
 ## Testing
 
 Run tests with:
+
 ```bash
 npm run test              # All tests
 npm run test:unit         # Unit tests only
@@ -158,12 +167,12 @@ npm run test:integration  # Integration tests only
 
 ## Resources
 
-| Resource             | Location                               |
-| -------------------- | -------------------------------------- |
-| Architecture Doc     | `docs/backend/server-architecture.md`  |
-| WebSocket Events     | `docs/backend/websocket-events.md`     |
-| API Documentation    | `docs/api/README.md`                   |
-| Health Endpoints     | `/health`, `/health/ready`, `/health/live` |
+| Resource          | Location                                   |
+| ----------------- | ------------------------------------------ |
+| Architecture Doc  | `docs/backend/server-architecture.md`      |
+| WebSocket Events  | `docs/backend/websocket-events.md`         |
+| API Documentation | `docs/api/README.md`                       |
+| Health Endpoints  | `/health`, `/health/ready`, `/health/live` |
 
 ## Success Criteria - ALL MET
 

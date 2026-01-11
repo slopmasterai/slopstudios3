@@ -23,13 +23,13 @@
 
 ### Server Components
 
-| Component            | Status | File                             |
-| -------------------- | ------ | -------------------------------- |
-| HTTP Server          | ✅     | `src/server/http.server.ts`      |
-| WebSocket Server     | ✅     | `src/server/websocket.server.ts` |
-| Server Config        | ✅     | `src/config/server.config.ts`    |
-| Logger               | ✅     | `src/utils/logger.ts`            |
-| Entry Point          | ✅     | `src/index.ts`                   |
+| Component        | Status | File                             |
+| ---------------- | ------ | -------------------------------- |
+| HTTP Server      | ✅     | `src/server/http.server.ts`      |
+| WebSocket Server | ✅     | `src/server/websocket.server.ts` |
+| Server Config    | ✅     | `src/config/server.config.ts`    |
+| Logger           | ✅     | `src/utils/logger.ts`            |
+| Entry Point      | ✅     | `src/index.ts`                   |
 
 ### Services
 
@@ -40,50 +40,50 @@
 
 ### Routes
 
-| Route          | Status | File                           |
-| -------------- | ------ | ------------------------------ |
-| Health Routes  | ✅     | `src/routes/health.routes.ts`  |
-| Auth Routes    | ✅     | `src/routes/auth.routes.ts`    |
+| Route         | Status | File                          |
+| ------------- | ------ | ----------------------------- |
+| Health Routes | ✅     | `src/routes/health.routes.ts` |
+| Auth Routes   | ✅     | `src/routes/auth.routes.ts`   |
 
 ### Middleware
 
-| Middleware     | Status | File                                  |
-| -------------- | ------ | ------------------------------------- |
-| Auth           | ✅     | `src/middleware/auth.middleware.ts`   |
-| Session        | ✅     | `src/middleware/session.middleware.ts`|
-| Rate Limit     | ✅     | `src/middleware/rate-limit.middleware.ts` |
-| Error Handler  | ✅     | `src/middleware/error.middleware.ts`  |
+| Middleware    | Status | File                                      |
+| ------------- | ------ | ----------------------------------------- |
+| Auth          | ✅     | `src/middleware/auth.middleware.ts`       |
+| Session       | ✅     | `src/middleware/session.middleware.ts`    |
+| Rate Limit    | ✅     | `src/middleware/rate-limit.middleware.ts` |
+| Error Handler | ✅     | `src/middleware/error.middleware.ts`      |
 
 ### WebSocket Handlers
 
-| Handler        | Status | File                                        |
-| -------------- | ------ | ------------------------------------------- |
-| Connection     | ✅     | `src/websocket/handlers/connection.handler.ts` |
-| Auth           | ✅     | `src/websocket/handlers/auth.handler.ts`    |
-| Heartbeat      | ✅     | `src/websocket/handlers/heartbeat.handler.ts` |
+| Handler    | Status | File                                           |
+| ---------- | ------ | ---------------------------------------------- |
+| Connection | ✅     | `src/websocket/handlers/connection.handler.ts` |
+| Auth       | ✅     | `src/websocket/handlers/auth.handler.ts`       |
+| Heartbeat  | ✅     | `src/websocket/handlers/heartbeat.handler.ts`  |
 
 ### Type Definitions
 
-| Types          | Status | File                          |
-| -------------- | ------ | ----------------------------- |
-| Server Types   | ✅     | `src/types/server.types.ts`   |
-| WebSocket Types| ✅     | `src/types/websocket.types.ts`|
+| Types           | Status | File                           |
+| --------------- | ------ | ------------------------------ |
+| Server Types    | ✅     | `src/types/server.types.ts`    |
+| WebSocket Types | ✅     | `src/types/websocket.types.ts` |
 
 ### Tests
 
-| Test           | Status | File                                   |
-| -------------- | ------ | -------------------------------------- |
-| Server Tests   | ✅     | `tests/integration/server.test.ts`     |
-| WebSocket Tests| ✅     | `tests/integration/websocket.test.ts`  |
-| Session Tests  | ✅     | `tests/unit/session.service.test.ts`   |
+| Test            | Status | File                                  |
+| --------------- | ------ | ------------------------------------- |
+| Server Tests    | ✅     | `tests/integration/server.test.ts`    |
+| WebSocket Tests | ✅     | `tests/integration/websocket.test.ts` |
+| Session Tests   | ✅     | `tests/unit/session.service.test.ts`  |
 
 ### Documentation
 
-| Document              | Status | File                                  |
-| --------------------- | ------ | ------------------------------------- |
-| Architecture          | ✅     | `docs/backend/server-architecture.md` |
-| WebSocket Events      | ✅     | `docs/backend/websocket-events.md`    |
-| API Documentation     | ✅     | `docs/api/README.md`                  |
+| Document          | Status | File                                  |
+| ----------------- | ------ | ------------------------------------- |
+| Architecture      | ✅     | `docs/backend/server-architecture.md` |
+| WebSocket Events  | ✅     | `docs/backend/websocket-events.md`    |
+| API Documentation | ✅     | `docs/api/README.md`                  |
 
 ## Technical Notes
 
@@ -130,7 +130,8 @@ curl http://localhost:3000/health
 ## Dependencies Added
 
 See `package.json` for full list. Key additions:
-- fastify, @fastify/* plugins
+
+- fastify, @fastify/\* plugins
 - socket.io
 - ioredis
 - jsonwebtoken

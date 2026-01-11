@@ -3,6 +3,10 @@
  * Implements Redis-backed session storage and utilities
  */
 
+/* eslint-disable @typescript-eslint/strict-boolean-expressions */
+/* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
+/* eslint-disable @typescript-eslint/require-await */
+
 import { serverConfig } from '../config/server.config.js';
 import { generateRequestId } from '../utils/index.js';
 import { logger } from '../utils/logger.js';
@@ -22,7 +26,10 @@ function getUserSessionsKey(userId: string): string {
   return `${SESSION_INDEX_PREFIX}${userId}`;
 }
 
-export async function createSession(userId: string, data: Partial<SessionData> = {}): Promise<string> {
+export async function createSession(
+  userId: string,
+  data: Partial<SessionData> = {}
+): Promise<string> {
   const redis = getRedisClient();
   const sessionId = generateRequestId().replace('req_', 'sess_');
 

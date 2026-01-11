@@ -33,9 +33,23 @@ const config: Config = {
       'ts-jest',
       {
         tsconfig: 'tsconfig.test.json',
+        useESM: true,
+      },
+    ],
+    // Transform ESM modules from Strudel packages
+    '^.+\\.m?js$': [
+      'ts-jest',
+      {
+        tsconfig: 'tsconfig.test.json',
+        useESM: true,
       },
     ],
   },
+
+  // Allow ESM modules from these packages to be transformed
+  transformIgnorePatterns: [
+    'node_modules/(?!(@strudel|superdough|supradough|web-audio-engine|fraction\\.js)/)',
+  ],
 
   // Coverage configuration
   collectCoverageFrom: [

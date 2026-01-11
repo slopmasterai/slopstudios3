@@ -23,9 +23,11 @@ const mockRedisInstance = {
   status: 'ready',
 };
 
-// Mock ioredis
+// Mock ioredis - must export Redis as named export
 jest.mock('ioredis', () => {
-  return jest.fn().mockImplementation(() => mockRedisInstance);
+  return {
+    Redis: jest.fn().mockImplementation(() => mockRedisInstance),
+  };
 });
 
 // Set environment variables before imports

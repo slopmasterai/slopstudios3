@@ -12,6 +12,18 @@ import type {
   ClaudeExecuteCallback,
   ClaudeCancelCallback,
 } from './claude.types.js';
+import type {
+  StrudelProgressPayload,
+  StrudelCompletePayload,
+  StrudelErrorPayload,
+  StrudelQueuedPayload,
+  StrudelValidatedPayload,
+  StrudelExecutePayload,
+  StrudelExecuteCallback,
+  StrudelCancelCallback,
+  StrudelValidateCallback,
+  StrudelStatusCallback,
+} from './strudel.types.js';
 
 /**
  * Events sent from server to clients
@@ -47,6 +59,13 @@ export interface ServerToClientEvents {
   'claude:complete': (data: ClaudeCompletePayload) => void;
   'claude:error': (data: ClaudeErrorPayload) => void;
   'claude:queued': (data: ClaudeQueuedPayload) => void;
+
+  // Strudel events
+  'strudel:validated': (data: StrudelValidatedPayload) => void;
+  'strudel:progress': (data: StrudelProgressPayload) => void;
+  'strudel:complete': (data: StrudelCompletePayload) => void;
+  'strudel:error': (data: StrudelErrorPayload) => void;
+  'strudel:queued': (data: StrudelQueuedPayload) => void;
 }
 
 /**
@@ -83,6 +102,18 @@ export interface ClientToServerEvents {
       queuePosition?: number;
       error?: string;
     }) => void
+  ) => void;
+
+  // Strudel events
+  'strudel:execute': (data: StrudelExecutePayload, callback?: StrudelExecuteCallback) => void;
+  'strudel:validate': (data: { code: string }, callback?: StrudelValidateCallback) => void;
+  'strudel:cancel': (
+    data: string | { processId: string },
+    callback?: StrudelCancelCallback
+  ) => void;
+  'strudel:status': (
+    data: string | { processId: string },
+    callback?: StrudelStatusCallback
   ) => void;
 }
 

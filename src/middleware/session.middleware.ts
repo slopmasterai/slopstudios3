@@ -4,6 +4,9 @@
  * Works with @fastify/session plugin for cookie-based sessions
  */
 
+/* eslint-disable @typescript-eslint/strict-boolean-expressions */
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+
 import { getSession, extendSession } from '../services/session.service.js';
 import { timestamp, generateRequestId } from '../utils/index.js';
 import { logger } from '../utils/logger.js';
@@ -35,10 +38,7 @@ function extractSessionId(request: FastifyRequest): string | null {
  * Validates session and attaches user data to request
  * Works with both cookie-based sessions (@fastify/session) and header-based sessions
  */
-export async function validateSession(
-  request: FastifyRequest,
-  reply: FastifyReply
-): Promise<void> {
+export async function validateSession(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   // Check if @fastify/session has a valid session with userId
   const fastifySessionUserId = request.session?.userId;
   if (fastifySessionUserId && typeof fastifySessionUserId === 'string') {
@@ -82,7 +82,10 @@ export async function validateSession(
   const session = await getSession(sessionId);
 
   if (!session) {
-    logger.debug({ requestId: request.id, sessionId, path: request.url }, 'Invalid or expired session');
+    logger.debug(
+      { requestId: request.id, sessionId, path: request.url },
+      'Invalid or expired session'
+    );
 
     const response: ApiResponse<null> = {
       success: false,

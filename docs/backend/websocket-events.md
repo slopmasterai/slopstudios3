@@ -626,6 +626,344 @@ socket.on('claude:error', (data) => {
 
 **Access Control:** Users can only cancel their own processes.
 
+### `strudel:validate`
+
+Validate a Strudel pattern without executing it. **Requires authentication.**
+
+```typescript
+// Payload
+interface StrudelValidatePayload {
+  code: string; // The Strudel pattern code (required, max 100000 chars)
+}
+
+// Callback response
+interface StrudelValidateCallback {
+  success: boolean;
+  isValid?: boolean; // Whether pattern is valid
+  errors?: StrudelValidationError[]; // Validation errors
+  warnings?: StrudelValidationWarning[]; // Validation warnings
+  transpiledCode?: string; // Transpiled pattern (if valid)
+  validationTimeMs?: number; // Validation duration
+  error?: string; // Error message (if failed)
+}
+
+interface StrudelValidationError {
+  message: string;
+  line?: number;
+  column?: number;
+  code: string;
+  suggestion?: string;
+}
+
+interface StrudelValidationWarning {
+  message: string;
+  code: string;
+}
+```
+
+Example:
+
+```javascript
+socket.emit(
+  'strudel:validate',
+  { code: 'note("c3 e3 g3").s("sawtooth")' },
+  (response) => {
+    if (response.success && response.isValid) {
+      console.log('Pattern is valid');
+    } else if (response.errors) {
+      console.error('Validation errors:', response.errors);
+    }
+  }
+);
+```
+
+**Rate Limit:** 30 requests per minute per user.
+
+### `strudel:execute`
+
+Execute a Strudel pattern and render audio with real-time progress updates.
+**Requires authentication.**
+
+```typescript
+// Payload
+interface StrudelExecutePayload {
+  code: string; // The Strudel pattern code (required)
+  options?: StrudelRenderOptions; // Render options
+  priority?: number; // Queue priority (0-100)
+}
+
+interface StrudelRenderOptions {
+  duration?: number; // Audio duration in seconds (default: 10, max: 600)
+  sampleRate?: number; // Sample rate (22050, 44100, 48000, 96000)
+  channels?: number; // Audio channels (1 or 2)
+  format?: 'wav'; // Output format (only 'wav' is currently supported)
+  tempo?: number; // Override tempo in BPM
+}
+
+// Callback response (immediate acknowledgment)
+interface StrudelExecuteCallback {
+  success: boolean;
+  processId?: string; // Unique process ID for tracking
+  status?: string; // 'pending', 'queued', 'rendering', etc.
+  error?: string; // Error message (if failed)
+}
+```
+
+Example:
+
+```javascript
+socket.emit(
+  'strudel:execute',
+  {
+    code: 's("bd sd hh sd").gain(0.8)',
+    options: { duration: 30, format: 'wav' },
+  },
+  (response) => {
+    if (response.success) {
+      console.log(`Process started: ${response.processId}`);
+      // Listen for strudel:progress, strudel:complete, strudel:error events
+    } else {
+      console.error(response.error);
+    }
+  }
+);
+```
+
+**Rate Limit:** 10 requests per minute per user.
+
+**Event Flow:**
+
+1. Client emits `strudel:execute` → receives callback with `processId`
+2. Server emits `strudel:queued` if capacity is full
+3. Server emits `strudel:progress` events during rendering
+4. Server emits `strudel:complete` when finished, or `strudel:error` on failure
+
+### `strudel:status`
+
+Query the status of a Strudel rendering process. **Requires authentication.**
+
+```typescript
+// Payload
+interface StrudelStatusPayload {
+  processId: string; // Process ID to check
+}
+
+// Callback response
+interface StrudelStatusCallback {
+  success: boolean;
+  status?: StrudelRedisState; // Full process state
+  error?: string; // Error message (if failed)
+}
+
+interface StrudelRedisState {
+  processId: string;
+  userId: string;
+  status: StrudelProcessStatus;
+  code: string;
+  options: StrudelRenderOptions;
+  priority: number;
+  progress: number;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+type StrudelProcessStatus =
+  | 'pending'
+  | 'queued'
+  | 'validating'
+  | 'rendering'
+  | 'complete'
+  | 'failed'
+  | 'cancelled';
+```
+
+Example:
+
+```javascript
+socket.emit('strudel:status', { processId }, (response) => {
+  if (response.success) {
+    console.log(`Status: ${response.status?.status}`);
+    console.log(`Progress: ${response.status?.progress}%`);
+  } else {
+    console.error(response.error);
+  }
+});
+```
+
+**Access Control:** Users can only query status of their own processes.
+
+### `strudel:cancel`
+
+Cancel a rendering or queued Strudel process. **Requires authentication.**
+
+```typescript
+// Payload
+interface StrudelCancelPayload {
+  processId: string; // Process ID to cancel
+}
+
+// Callback response
+interface StrudelCancelCallback {
+  success: boolean;
+  cancelled?: boolean; // Whether process was actually cancelled
+  error?: string; // Error message (if failed)
+}
+```
+
+Example:
+
+```javascript
+socket.emit('strudel:cancel', { processId }, (response) => {
+  if (response.success && response.cancelled) {
+    console.log('Process cancelled');
+  } else if (!response.cancelled) {
+    console.log('Process was not found or already completed');
+  }
+});
+```
+
+**Access Control:** Users can only cancel their own processes.
+
+## Strudel Server-to-Client Events
+
+### `strudel:validated`
+
+Emitted after pattern validation completes.
+
+```typescript
+interface StrudelValidatedPayload {
+  requestId?: string;
+  isValid: boolean;
+  errors: StrudelValidationError[];
+  warnings: StrudelValidationWarning[];
+  transpiledCode?: string;
+  validationTimeMs: number;
+  timestamp: string;
+}
+```
+
+### `strudel:queued`
+
+Emitted when a render request is queued due to capacity limits.
+
+```typescript
+interface StrudelQueuedPayload {
+  processId: string;
+  queuePosition: number;
+  estimatedWaitMs?: number;
+  timestamp: string;
+}
+```
+
+### `strudel:progress`
+
+Emitted during audio rendering to provide progress updates.
+
+```typescript
+interface StrudelProgressPayload {
+  processId: string;
+  progress: number; // Progress percentage (0-100)
+  status: StrudelProcessStatus;
+  message?: string; // Status message
+  timestamp: string;
+}
+```
+
+Example:
+
+```javascript
+socket.on('strudel:progress', (data) => {
+  console.log(`Rendering: ${data.progress}%`);
+  updateProgressBar(data.progress);
+});
+```
+
+### `strudel:complete`
+
+Emitted when audio rendering completes successfully.
+
+```typescript
+interface StrudelCompletePayload {
+  processId: string;
+  audioBuffer?: number[]; // Audio samples (if included)
+  audioMetadata: {
+    duration: number;
+    sampleRate: number;
+    channels: number;
+    format: string;
+    fileSize: number;
+  };
+  timing: {
+    startedAt: Date;
+    completedAt: Date;
+    validationTimeMs: number;
+    renderTimeMs: number;
+    totalTimeMs: number;
+  };
+  timestamp: string;
+}
+```
+
+Example:
+
+```javascript
+socket.on('strudel:complete', (data) => {
+  console.log(`Rendered ${data.audioMetadata.duration}s of audio`);
+  console.log(`Total time: ${data.timing.totalTimeMs}ms`);
+  // Handle audio data...
+});
+```
+
+### `strudel:error`
+
+Emitted when a Strudel operation fails.
+
+```typescript
+interface StrudelErrorPayload {
+  processId?: string;
+  error: {
+    code: string;
+    message: string;
+  };
+  timestamp: string;
+}
+```
+
+**Error Codes:**
+
+| Code                  | Description                        |
+| --------------------- | ---------------------------------- |
+| `UNAUTHORIZED`        | Authentication required            |
+| `VALIDATION_ERROR`    | Pattern validation failed          |
+| `RATE_LIMIT_EXCEEDED` | Too many requests                  |
+| `RENDER_ERROR`        | Audio rendering failed             |
+| `TIMEOUT_ERROR`       | Render exceeded timeout            |
+| `CANCELLED`           | Process was cancelled              |
+| `QUEUE_FULL`          | Render queue is full               |
+| `PATTERN_TOO_LONG`    | Pattern exceeds maximum length     |
+| `DURATION_TOO_LONG`   | Requested duration exceeds maximum |
+
+Example:
+
+```javascript
+socket.on('strudel:error', (data) => {
+  console.error(`Error ${data.error.code}: ${data.error.message}`);
+  if (data.processId) {
+    console.error(`Process: ${data.processId}`);
+  }
+});
+```
+
+## Strudel Rate Limits
+
+Strudel operations have dedicated per-user rate limits:
+
+| Operation | Window     | Max Requests | Redis Key                      |
+| --------- | ---------- | ------------ | ------------------------------ |
+| Validate  | 60 seconds | 30           | `ws:strudel:validate:{userId}` |
+| Execute   | 60 seconds | 10           | `ws:strudel:execute:{userId}`  |
+
 ## Authentication
 
 ### Via Handshake
