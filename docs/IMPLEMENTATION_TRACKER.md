@@ -15,15 +15,18 @@
 - Phase 11: :white_check_mark: Complete
 - Phase 12: :white_check_mark: Complete
 - Phase 13: :white_check_mark: Complete
+- Phase 14: :white_check_mark: Complete
 
 ## Current Status
 
-**Status**: Strudel integration complete - Ready for live coding music features
+**Status**: Agent Orchestration complete - Ready for multi-agent workflows
 
-Infrastructure, backend core, Claude CLI integration, and Strudel live coding
-music integration are complete. The server provides HTTP APIs, WebSocket
-real-time communication, Redis-backed session management, Claude CLI wrapper for
-AI operations, and Strudel pattern validation and audio rendering.
+Infrastructure, backend core, Claude CLI integration, Strudel live coding music
+integration, and Agent Orchestration are complete. The server provides HTTP
+APIs, WebSocket real-time communication, Redis-backed session management, Claude
+CLI wrapper for AI operations, Strudel pattern validation and audio rendering,
+and a comprehensive agent orchestration system for coordinating multi-agent
+workflows.
 
 ## Phase Summary
 
@@ -42,6 +45,7 @@ AI operations, and Strudel pattern validation and audio rendering.
 | 11    | Backend Core           | 2026-01-10 | [phase-11-status.md](./phase-11-status.md) | [phase-11-handoff.md](./phase-11-handoff.md) |
 | 12    | Claude CLI Wrapper     | 2026-01-10 | [phase-12-status.md](./phase-12-status.md) | [phase-12-handoff.md](./phase-12-handoff.md) |
 | 13    | Strudel Integration    | 2026-01-10 | [phase-13-status.md](./phase-13-status.md) | [phase-13-handoff.md](./phase-13-handoff.md) |
+| 14    | Agent Orchestration    | 2026-01-11 | [phase-14-status.md](./phase-14-status.md) | [phase-14-handoff.md](./phase-14-handoff.md) |
 
 ## Quick Links
 
@@ -72,6 +76,128 @@ AI operations, and Strudel pattern validation and audio rendering.
 | Logging          | Pino           | 9.x     |
 | AI Integration   | Anthropic SDK  | Latest  |
 | Live Coding      | Strudel        | 1.1.x   |
+
+## Phase 14: Agent Orchestration
+
+**Completed**: 2026-01-11
+
+### Overview
+
+Phase 14 implements a comprehensive Agent Orchestration System that coordinates
+multiple AI agents (Claude, Strudel, custom), manages prompt templates, and
+executes complex workflows with dependency resolution.
+
+### Completed Items
+
+#### Core Services
+
+- [x] Prompt Template Service (`src/services/prompt-template.service.ts`)
+- [x] Agent Registry Service (`src/services/agent-registry.service.ts`)
+- [x] Workflow Context Service (`src/services/workflow-context.service.ts`)
+- [x] Workflow Engine Service (`src/services/workflow-engine.service.ts`)
+- [x] Orchestration Service (`src/services/orchestration.service.ts`)
+- [x] Agent Metrics Service (`src/services/agent-metrics.service.ts`)
+- [x] Agent types definitions (`src/types/agent.types.ts`)
+
+#### REST API Endpoints
+
+- [x] POST `/api/v1/agents/templates` - Create template
+- [x] GET `/api/v1/agents/templates/:id` - Get template
+- [x] PUT `/api/v1/agents/templates/:id` - Update template
+- [x] DELETE `/api/v1/agents/templates/:id` - Delete template
+- [x] GET `/api/v1/agents/templates` - List templates
+- [x] POST `/api/v1/agents/templates/:id/interpolate` - Interpolate template
+- [x] POST `/api/v1/agents/registry` - Register agent
+- [x] GET `/api/v1/agents/registry` - List agents
+- [x] GET `/api/v1/agents/registry/:id` - Get agent
+- [x] DELETE `/api/v1/agents/registry/:id` - Unregister agent
+- [x] POST `/api/v1/agents/registry/:id/execute` - Execute agent
+- [x] POST `/api/v1/agents/workflows` - Execute workflow
+- [x] GET `/api/v1/agents/workflows/:id` - Get workflow status
+- [x] DELETE `/api/v1/agents/workflows/:id` - Cancel workflow
+- [x] POST `/api/v1/agents/workflows/:id/pause` - Pause workflow
+- [x] POST `/api/v1/agents/workflows/:id/resume` - Resume workflow
+- [x] GET `/api/v1/agents/workflows` - List workflows
+- [x] POST `/api/v1/agents/orchestrate` - Orchestrate with pattern
+- [x] POST `/api/v1/agents/orchestrate/sequential` - Sequential orchestration
+- [x] POST `/api/v1/agents/orchestrate/parallel` - Parallel orchestration
+- [x] GET `/api/v1/agents/metrics` - Get metrics
+- [x] GET `/api/v1/agents/health` - Health check
+
+#### WebSocket Handlers
+
+- [x] `agent:workflow:execute` - Execute workflow
+- [x] `agent:workflow:status` - Get workflow status
+- [x] `agent:workflow:cancel` - Cancel workflow
+- [x] `agent:workflow:pause` - Pause workflow
+- [x] `agent:workflow:resume` - Resume workflow
+- [x] `agent:orchestrate` - Orchestrate steps
+- [x] Real-time event forwarding (started, step:completed, completed, failed)
+
+#### Key Features
+
+- [x] Variable interpolation with `{{variableName}}` syntax
+- [x] Template versioning with rollback
+- [x] Built-in Claude and Strudel agents
+- [x] Custom agent registration with executor functions
+- [x] Dependency resolution using topological sort
+- [x] Parallel execution with configurable limits
+- [x] Retry policies with exponential backoff
+- [x] Orchestration patterns: sequential, parallel, conditional, map-reduce
+- [x] Workflow context with snapshot/restore
+- [x] Comprehensive metrics collection
+
+#### Configuration
+
+- [x] `AGENT_MAX_CONCURRENT_WORKFLOWS` - Max concurrent workflows
+- [x] `AGENT_WORKFLOW_TIMEOUT_MS` - Workflow timeout
+- [x] `AGENT_ENABLE_QUEUE` - Enable workflow queue
+- [x] `AGENT_MAX_QUEUE_SIZE` - Max queue size
+- [x] `AGENT_MAX_WORKFLOW_STEPS` - Max steps per workflow
+- [x] `AGENT_CONTEXT_TTL_SECONDS` - Context TTL
+- [x] `AGENT_TEMPLATE_CACHE_TTL` - Template cache TTL
+- [x] `AGENT_ENABLE_PARALLEL_EXECUTION` - Enable parallel execution
+- [x] `AGENT_MAX_PARALLEL_STEPS` - Max parallel steps
+
+#### Architecture Decision
+
+- [x] ADR-0006: Agent Orchestration (`docs/adr/0006-agent-orchestration.md`)
+
+### Documentation
+
+- [x] Phase 14 status document (`docs/phase-14-status.md`)
+- [x] Phase 14 handoff document (`docs/phase-14-handoff.md`)
+- [x] Agent orchestration architecture (`docs/backend/agent-orchestration.md`)
+- [x] Agent orchestration API documentation
+      (`docs/backend/agent-orchestration-api.md`)
+- [x] Agent endpoints API reference (`docs/api/agent-endpoints.md`)
+- [x] Example workflows documentation (`docs/examples/agent-workflows.md`)
+
+### Tests
+
+- [x] Unit tests for prompt template service
+      (`tests/unit/prompt-template.service.test.ts`)
+- [x] Unit tests for agent registry service
+      (`tests/unit/agent-registry.service.test.ts`)
+- [x] Unit tests for workflow context service
+      (`tests/unit/workflow-context.service.test.ts`)
+- [x] Unit tests for workflow engine service
+      (`tests/unit/workflow-engine.service.test.ts`)
+- [x] Unit tests for orchestration service
+      (`tests/unit/orchestration.service.test.ts`)
+- [x] Unit tests for agent metrics service
+      (`tests/unit/agent-metrics.service.test.ts`)
+- [x] Integration tests for REST API (`tests/integration/agent.test.ts`)
+- [x] Integration tests for WebSocket
+      (`tests/integration/agent-websocket.test.ts`)
+
+### Bug Fixes
+
+- [x] Fixed workflow timeout event consistency - timeout now emits `failed`
+      event instead of unhandled `workflow:failed` so WebSocket clients receive
+      timeout failures
+
+---
 
 ## Phase 13: Strudel Integration
 
@@ -315,7 +441,7 @@ enabling AI-powered features through both the Claude CLI and Anthropic SDK.
 
 ## Next Steps
 
-With Strudel integration complete, the project is ready for:
+With Agent Orchestration complete, the project is ready for:
 
 1. **Real Audio Rendering** - Implement actual Strudel synthesis in Worker
 2. **Sample Support** - Add sample loading and playback
@@ -323,7 +449,8 @@ With Strudel integration complete, the project is ready for:
 4. **Database Integration** - Connect PostgreSQL with Prisma or Drizzle ORM
 5. **User Management** - Implement registration, profiles, password reset
 6. **Frontend Development** - Create user interface with real-time streaming
-7. **AI-Powered Music** - Claude-generated Strudel patterns
+7. **AI-Powered Music Workflows** - Complex multi-agent creative pipelines
+8. **Custom Agent Development** - Build domain-specific agents
 
 ## Maintenance Notes
 
