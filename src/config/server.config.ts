@@ -38,6 +38,17 @@ export interface ServerConfig extends Config {
     poolSize: number;
     ssl: boolean;
   };
+  claude: {
+    cliPath: string;
+    apiKey?: string;
+    maxConcurrentProcesses: number;
+    processTimeoutMs: number;
+    enableQueue: boolean;
+    maxQueueSize: number;
+    useApiFallback: boolean;
+    maxRetries: number;
+    retryDelayMs: number;
+  };
 }
 
 function getEnvString(key: string, defaultValue?: string): string {
@@ -107,7 +118,10 @@ function validateConfig(config: ServerConfig): void {
     }
   }
 
-  if (!config.session.secret || config.session.secret === 'your-secret-key-here-change-in-production') {
+  if (
+    !config.session.secret ||
+    config.session.secret === 'your-secret-key-here-change-in-production'
+  ) {
     if (config.env === 'production') {
       errors.push('APP_SECRET must be set to a secure value in production');
     }
@@ -142,7 +156,7 @@ function loadConfig(): ServerConfig {
     },
     redis: {
       url: getEnvString('REDIS_URL', 'redis://localhost:6379'),
-      password: process.env['REDIS_PASSWORD'] || undefined,
+      password: process.env['REDIS_PASSWORD'] ?? undefined,
       tls: getEnvBoolean('REDIS_TLS', false),
     },
     jwt: {
@@ -153,6 +167,17 @@ function loadConfig(): ServerConfig {
       url: getEnvString('DATABASE_URL', 'postgresql://user:password@localhost:5432/slopstudios3'),
       poolSize: getEnvNumber('DATABASE_POOL_SIZE', 10),
       ssl: getEnvBoolean('DATABASE_SSL', false),
+    },
+    claude: {
+      cliPath: getEnvString('CLAUDE_CLI_PATH', '/usr/local/bin/claude'),
+      apiKey: process.env['ANTHROPIC_API_KEY'] ?? undefined,
+      maxConcurrentProcesses: getEnvNumber('CLAUDE_MAX_CONCURRENT_PROCESSES', 5),
+      processTimeoutMs: getEnvNumber('CLAUDE_PROCESS_TIMEOUT_MS', 300000),
+      enableQueue: getEnvBoolean('CLAUDE_ENABLE_QUEUE', true),
+      maxQueueSize: getEnvNumber('CLAUDE_MAX_QUEUE_SIZE', 100),
+      useApiFallback: getEnvBoolean('CLAUDE_USE_API_FALLBACK', true),
+      maxRetries: getEnvNumber('CLAUDE_MAX_RETRIES', 3),
+      retryDelayMs: getEnvNumber('CLAUDE_RETRY_DELAY_MS', 1000),
     },
   };
 

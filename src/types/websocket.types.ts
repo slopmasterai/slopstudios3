@@ -3,6 +3,16 @@
  * Socket.IO event maps for type-safe event handling
  */
 
+import type {
+  ClaudeProgressPayload,
+  ClaudeCompletePayload,
+  ClaudeErrorPayload,
+  ClaudeQueuedPayload,
+  ClaudeExecutePayload,
+  ClaudeExecuteCallback,
+  ClaudeCancelCallback,
+} from './claude.types.js';
+
 /**
  * Events sent from server to clients
  */
@@ -31,6 +41,12 @@ export interface ServerToClientEvents {
   mediaProgress: (data: MediaProgressPayload) => void;
   mediaComplete: (data: MediaCompletePayload) => void;
   mediaError: (data: MediaErrorPayload) => void;
+
+  // Claude events
+  'claude:progress': (data: ClaudeProgressPayload) => void;
+  'claude:complete': (data: ClaudeCompletePayload) => void;
+  'claude:error': (data: ClaudeErrorPayload) => void;
+  'claude:queued': (data: ClaudeQueuedPayload) => void;
 }
 
 /**
@@ -55,6 +71,19 @@ export interface ClientToServerEvents {
   // Media events (for /media namespace)
   subscribeMedia: (mediaId: string, callback?: MediaSubscribeCallback) => void;
   unsubscribeMedia: (mediaId: string, callback?: MediaSubscribeCallback) => void;
+
+  // Claude events
+  'claude:execute': (data: ClaudeExecutePayload, callback?: ClaudeExecuteCallback) => void;
+  'claude:cancel': (processId: string, callback?: ClaudeCancelCallback) => void;
+  'claude:status': (
+    processId: string,
+    callback?: (response: {
+      success: boolean;
+      status?: string;
+      queuePosition?: number;
+      error?: string;
+    }) => void
+  ) => void;
 }
 
 /**
@@ -149,7 +178,11 @@ export interface MediaErrorPayload {
 }
 
 // Callback types
-export type AuthenticateCallback = (response: { success: boolean; userId?: string; error?: string }) => void;
+export type AuthenticateCallback = (response: {
+  success: boolean;
+  userId?: string;
+  error?: string;
+}) => void;
 export type LogoutCallback = (response: { success: boolean }) => void;
 export type RoomCallback = (response: { success: boolean; room?: string; error?: string }) => void;
 export type ConnectionInfoCallback = (info: {
@@ -160,8 +193,16 @@ export type ConnectionInfoCallback = (info: {
   connectedAt: string;
 }) => void;
 export type PingCallback = (response: { timestamp: number }) => void;
-export type HeartbeatCallback = (response: { timestamp: number; serverTime: string; latency: number | null }) => void;
-export type MediaSubscribeCallback = (response: { success: boolean; mediaId?: string; error?: string }) => void;
+export type HeartbeatCallback = (response: {
+  timestamp: number;
+  serverTime: string;
+  latency: number | null;
+}) => void;
+export type MediaSubscribeCallback = (response: {
+  success: boolean;
+  mediaId?: string;
+  error?: string;
+}) => void;
 
 /**
  * WebSocket client metadata for tracking

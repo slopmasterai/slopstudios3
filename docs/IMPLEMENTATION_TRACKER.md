@@ -13,13 +13,15 @@
 - Phase 9: :white_check_mark: Complete
 - Phase 10: :white_check_mark: Complete
 - Phase 11: :white_check_mark: Complete
+- Phase 12: :white_check_mark: Complete
 
 ## Current Status
 
-**Status**: Backend core operational - Ready for feature development
+**Status**: Claude CLI integration complete - Ready for AI-powered features
 
-Infrastructure and backend core are complete. The server provides HTTP APIs,
-WebSocket real-time communication, and Redis-backed session management.
+Infrastructure, backend core, and Claude CLI integration are complete. The
+server provides HTTP APIs, WebSocket real-time communication, Redis-backed
+session management, and Claude CLI wrapper for AI operations.
 
 ## Phase Summary
 
@@ -36,6 +38,7 @@ WebSocket real-time communication, and Redis-backed session management.
 | 9     | Security & Compliance  | 2024-01-10 | [phase-9-status.md](./phase-9-status.md)   | [phase-9-handoff.md](./phase-9-handoff.md)   |
 | 10    | Resilience             | 2024-01-10 | [phase-10-status.md](./phase-10-status.md) | [phase-10-handoff.md](./phase-10-handoff.md) |
 | 11    | Backend Core           | 2026-01-10 | [phase-11-status.md](./phase-11-status.md) | [phase-11-handoff.md](./phase-11-handoff.md) |
+| 12    | Claude CLI Wrapper     | 2026-01-10 | [phase-12-status.md](./phase-12-status.md) | [phase-12-handoff.md](./phase-12-handoff.md) |
 
 ## Quick Links
 
@@ -64,6 +67,86 @@ WebSocket real-time communication, and Redis-backed session management.
 | Database         | PostgreSQL     | 16      |
 | Cache/Sessions   | Redis          | 7       |
 | Logging          | Pino           | 9.x     |
+| AI Integration   | Anthropic SDK  | Latest  |
+
+## Phase 12: Claude CLI Wrapper
+
+**Completed**: 2026-01-10
+
+### Overview
+
+Phase 12 implements the Claude CLI wrapper and process management system,
+enabling AI-powered features through both the Claude CLI and Anthropic SDK.
+
+### Completed Items
+
+#### Claude CLI Integration
+
+- [x] Claude service wrapper (`src/services/claude.service.ts`)
+- [x] Process manager service (`src/services/process-manager.service.ts`)
+- [x] Claude metrics service (`src/services/claude-metrics.service.ts`)
+- [x] Claude types definitions (`src/types/claude.types.ts`)
+
+#### REST API Endpoints
+
+- [x] POST `/api/v1/claude/execute` - Execute Claude command synchronously
+- [x] POST `/api/v1/claude/execute/async` - Execute Claude command
+      asynchronously
+- [x] GET `/api/v1/claude/processes/:id` - Get process status
+- [x] DELETE `/api/v1/claude/processes/:id` - Cancel running process
+- [x] GET `/api/v1/claude/processes` - List user's processes
+- [x] GET `/api/v1/claude/metrics` - Get metrics data
+- [x] GET `/api/v1/claude/health` - Health check endpoint
+
+#### WebSocket Handlers
+
+- [x] Real-time streaming for Claude responses
+- [x] `claude:execute` event handler (client→server)
+- [x] `claude:status` event handler (client→server)
+- [x] `claude:cancel` event handler (client→server)
+- [x] `claude:progress` event (server→client)
+- [x] `claude:queued` event (server→client)
+- [x] `claude:complete` event (server→client)
+- [x] `claude:error` event (server→client)
+
+#### Process Management
+
+- [x] Process queue with configurable concurrency
+- [x] Lifecycle tracking (pending, running, completed, failed, cancelled)
+- [x] Graceful shutdown with process cleanup
+- [x] Timeout handling and automatic cleanup
+
+#### Metrics & Monitoring
+
+- [x] Request counting and timing
+- [x] Success/failure tracking
+- [x] Queue depth monitoring
+- [x] Process lifecycle metrics
+
+#### Architecture Decision
+
+- [x] ADR-0004: Claude CLI Integration
+      (`docs/adr/0004-claude-cli-integration.md`)
+
+### Dependencies Added
+
+- `@anthropic-ai/sdk` - Anthropic SDK for API fallback
+
+### Documentation
+
+- [x] Phase 12 status document (`docs/phase-12-status.md`)
+- [x] Phase 12 handoff document (`docs/phase-12-handoff.md`)
+- [x] Claude API documentation (`docs/api/claude-endpoints.md`)
+- [x] Claude integration guide (`docs/backend/claude-integration.md`)
+
+### Tests
+
+- [x] Unit tests for Claude service (`tests/unit/claude.service.test.ts`)
+- [x] Unit tests for process manager
+      (`tests/unit/process-manager.service.test.ts`)
+- [x] Integration tests (`tests/integration/claude.test.ts`)
+
+---
 
 ## Infrastructure Components
 
@@ -139,14 +222,14 @@ WebSocket real-time communication, and Redis-backed session management.
 
 ## Next Steps
 
-With backend core complete, the project is ready for:
+With Claude CLI integration complete, the project is ready for:
 
 1. **Database Integration** - Connect PostgreSQL with Prisma or Drizzle ORM
 2. **User Management** - Implement registration, profiles, password reset
-3. **Media API** - Build endpoints for media upload and generation
-4. **Frontend Development** - Create user interface
-5. **Integration Testing** - Add comprehensive integration tests
-6. **Performance Testing** - Establish performance baselines
+3. **Media API** - Build endpoints for media upload and generation using Claude
+4. **Frontend Development** - Create user interface with real-time AI streaming
+5. **AI-Powered Features** - Implement media generation workflows
+6. **Performance Testing** - Establish performance baselines for AI operations
 
 ## Maintenance Notes
 

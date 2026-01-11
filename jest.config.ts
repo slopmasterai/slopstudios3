@@ -16,13 +16,15 @@ const config: Config = {
   // Test file patterns
   testMatch: ['**/__tests__/**/*.(spec|test).[jt]s?(x)', '**/*.(spec|test).[jt]s?(x)'],
 
-  // Path aliases (matching tsconfig.json)
+  // Path aliases (matching tsconfig.json) and ESM .js to .ts mapping
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@types/(.*)$': '<rootDir>/src/types/$1',
     '^@utils/(.*)$': '<rootDir>/src/utils/$1',
     '^@services/(.*)$': '<rootDir>/src/services/$1',
     '^@components/(.*)$': '<rootDir>/src/components/$1',
+    // Map .js imports to .ts files for ESM compatibility
+    '^(\\.{1,2}/.*)\\.js$': '$1',
   },
 
   // Transform settings

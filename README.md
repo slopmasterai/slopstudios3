@@ -12,6 +12,7 @@ intelligence for media generation, manipulation, and distribution.
 - Node.js >= 20.0.0 (see `.nvmrc`)
 - Docker and Docker Compose
 - Git
+- Claude CLI (optional, for full AI features)
 
 ## Quick Start
 
@@ -93,16 +94,58 @@ slopstudios3/
 
 ## Environment Variables
 
-| Variable       | Description                | Required | Default       |
-| -------------- | -------------------------- | -------- | ------------- |
-| `NODE_ENV`     | Environment mode           | No       | `development` |
-| `PORT`         | Server port                | No       | `3000`        |
-| `DATABASE_URL` | Database connection string | Yes      | -             |
-| `REDIS_URL`    | Redis connection string    | No       | -             |
-| `API_KEY`      | External API key           | Yes      | -             |
-| `LOG_LEVEL`    | Logging level              | No       | `info`        |
+| Variable                          | Description                             | Required | Default                 |
+| --------------------------------- | --------------------------------------- | -------- | ----------------------- |
+| `NODE_ENV`                        | Environment mode                        | No       | `development`           |
+| `PORT`                            | Server port                             | No       | `3000`                  |
+| `DATABASE_URL`                    | Database connection string              | Yes      | -                       |
+| `REDIS_URL`                       | Redis connection string                 | No       | -                       |
+| `API_KEY`                         | External API key                        | Yes      | -                       |
+| `LOG_LEVEL`                       | Logging level                           | No       | `info`                  |
+| `ANTHROPIC_API_KEY`               | Anthropic API key for Claude            | No       | -                       |
+| `CLAUDE_CLI_PATH`                 | Path to Claude CLI binary               | No       | `/usr/local/bin/claude` |
+| `CLAUDE_MAX_CONCURRENT_PROCESSES` | Max concurrent Claude CLI processes     | No       | `5`                     |
+| `CLAUDE_PROCESS_TIMEOUT_MS`       | Timeout for Claude processes in ms      | No       | `300000`                |
+| `CLAUDE_ENABLE_QUEUE`             | Enable request queuing when at capacity | No       | `true`                  |
+| `CLAUDE_MAX_QUEUE_SIZE`           | Max requests to queue before rejecting  | No       | `100`                   |
+| `CLAUDE_USE_API_FALLBACK`         | Use Anthropic API when CLI unavailable  | No       | `true`                  |
 
 See `.env.example` for a complete list of environment variables.
+
+## Claude CLI Integration
+
+The platform includes AI-powered features through Claude CLI integration:
+
+### Setup
+
+1. **Install Claude CLI** (optional but recommended):
+
+   ```bash
+   # Follow Anthropic's installation instructions
+   # https://docs.anthropic.com/en/docs/claude-code
+   ```
+
+2. **Configure API Key** (required for API fallback):
+   ```bash
+   # Add to .env
+   ANTHROPIC_API_KEY=sk-ant-your-api-key
+   ```
+
+### Features
+
+- **REST API**: Execute Claude commands via HTTP at `/api/v1/claude/*`
+- **WebSocket Streaming**: Real-time output via Socket.IO
+- **Process Management**: Queue, cancel, and monitor AI processes
+- **API Fallback**: Automatic fallback to Anthropic SDK when CLI unavailable
+
+### Health Check
+
+```bash
+curl http://localhost:3000/api/v1/claude/health
+```
+
+See [Claude Integration Documentation](docs/backend/claude-integration.md) for
+details.
 
 ## Development
 
