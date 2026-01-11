@@ -54,6 +54,12 @@ jest.mock('../../src/services/process-manager.service.js', () => ({
   getActiveProcessCount: jest.fn(),
   onProcessEvent: jest.fn(() => jest.fn()),
   isProcessRunning: jest.fn(),
+  recordProcessDuration: jest.fn().mockResolvedValue(undefined),
+  getProcessEmitter: jest.fn(() => ({
+    emit: jest.fn(),
+    on: jest.fn(),
+    off: jest.fn(),
+  })),
 }));
 
 // Mock Redis service
@@ -109,7 +115,7 @@ import {
 describe('ClaudeService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.resetModules();
+    // Note: Don't use jest.resetModules() here as it breaks dynamic imports with mocks
 
     // Default mocks
     (existsSync as jest.Mock).mockReturnValue(true);
@@ -118,12 +124,13 @@ describe('ClaudeService', () => {
     (spawnProcess as jest.Mock).mockResolvedValue('test-process-id');
     (getProcessState as jest.Mock).mockResolvedValue(null);
     (updateProcessState as jest.Mock).mockResolvedValue(true);
-    (enqueueProcess as jest.Mock).mockResolvedValue(1);
+    (enqueueProcess as jest.Mock).mockResolvedValue({ position: 1, estimatedWaitSeconds: 10 });
     (getQueuePosition as jest.Mock).mockResolvedValue(null);
   });
 
   afterEach(() => {
-    jest.resetModules();
+    // Clear mocks but don't reset modules (breaks dynamic imports)
+    jest.clearAllMocks();
   });
 
   describe('validateClaudeInstallation', () => {
@@ -131,9 +138,10 @@ describe('ClaudeService', () => {
       (existsSync as jest.Mock).mockReturnValue(true);
       (execSync as jest.Mock).mockReturnValue('claude-cli v1.2.3');
 
-      const { validateClaudeInstallation, initializeClaudeService } =
+      const { validateClaudeInstallation, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({ cliPath: '/usr/local/bin/claude' });
 
       const status = validateClaudeInstallation();
@@ -145,9 +153,10 @@ describe('ClaudeService', () => {
     it('should return installed false when CLI does not exist', async () => {
       (existsSync as jest.Mock).mockReturnValue(false);
 
-      const { validateClaudeInstallation, initializeClaudeService } =
+      const { validateClaudeInstallation, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({ cliPath: '/nonexistent/claude' });
 
       const status = validateClaudeInstallation();
@@ -162,9 +171,10 @@ describe('ClaudeService', () => {
         throw new Error('Version check failed');
       });
 
-      const { validateClaudeInstallation, initializeClaudeService } =
+      const { validateClaudeInstallation, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({ cliPath: '/usr/local/bin/claude' });
 
       const status = validateClaudeInstallation();
@@ -178,9 +188,10 @@ describe('ClaudeService', () => {
     it('should return true when CLI is installed', async () => {
       (existsSync as jest.Mock).mockReturnValue(true);
 
-      const { isClaudeAvailable, initializeClaudeService } =
+      const { isClaudeAvailable, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({ cliPath: '/usr/local/bin/claude', useApiFallback: false });
 
       const available = isClaudeAvailable();
@@ -191,9 +202,10 @@ describe('ClaudeService', () => {
     it('should return true when API fallback is configured and CLI not available', async () => {
       (existsSync as jest.Mock).mockReturnValue(false);
 
-      const { isClaudeAvailable, initializeClaudeService } =
+      const { isClaudeAvailable, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({
         cliPath: '/nonexistent/claude',
         apiKey: 'sk-test-key',
@@ -208,9 +220,10 @@ describe('ClaudeService', () => {
     it('should return false when neither CLI nor API fallback is available', async () => {
       (existsSync as jest.Mock).mockReturnValue(false);
 
-      const { isClaudeAvailable, initializeClaudeService } =
+      const { isClaudeAvailable, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({
         cliPath: '/nonexistent/claude',
         useApiFallback: false,
@@ -241,9 +254,10 @@ describe('ClaudeService', () => {
         updatedAt: new Date().toISOString(),
       });
 
-      const { executeClaudeCommand, initializeClaudeService } =
+      const { executeClaudeCommand, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({
         cliPath: '/usr/local/bin/claude',
         maxConcurrentProcesses: 5,
@@ -266,9 +280,10 @@ describe('ClaudeService', () => {
 
       // Mock Anthropic SDK response - already mocked in setup
 
-      const { executeClaudeCommand, initializeClaudeService } =
+      const { executeClaudeCommand, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({
         cliPath: '/nonexistent/claude',
         apiKey: 'sk-test-key',
@@ -289,11 +304,12 @@ describe('ClaudeService', () => {
     it('should queue request when concurrency limit is reached', async () => {
       (existsSync as jest.Mock).mockReturnValue(true);
       (getActiveProcessCount as jest.Mock).mockResolvedValue(5);
-      (enqueueProcess as jest.Mock).mockResolvedValue(1);
+      (enqueueProcess as jest.Mock).mockResolvedValue({ position: 1, estimatedWaitSeconds: 10 });
 
-      const { executeClaudeCommand, initializeClaudeService } =
+      const { executeClaudeCommand, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({
         cliPath: '/usr/local/bin/claude',
         maxConcurrentProcesses: 5,
@@ -434,9 +450,10 @@ describe('ClaudeService', () => {
       (existsSync as jest.Mock).mockReturnValue(true);
       (getActiveProcessCount as jest.Mock).mockResolvedValue(2);
 
-      const { getClaudeServiceHealth, initializeClaudeService } =
+      const { getClaudeServiceHealth, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({
         cliPath: '/usr/local/bin/claude',
         maxConcurrentProcesses: 5,
@@ -453,9 +470,10 @@ describe('ClaudeService', () => {
     it('should return healthy when API fallback is available', async () => {
       (existsSync as jest.Mock).mockReturnValue(false);
 
-      const { getClaudeServiceHealth, initializeClaudeService } =
+      const { getClaudeServiceHealth, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({
         cliPath: '/nonexistent/claude',
         apiKey: 'sk-test-key',
@@ -511,9 +529,10 @@ describe('ClaudeService', () => {
         });
       });
 
-      const { executeClaudeCommand, initializeClaudeService } =
+      const { executeClaudeCommand, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       // Disable API fallback to force CLI usage
       initializeClaudeService({
         cliPath: '/usr/local/bin/claude',
@@ -556,9 +575,10 @@ describe('ClaudeService', () => {
         updatedAt: new Date().toISOString(),
       });
 
-      const { executeClaudeCommand, initializeClaudeService } =
+      const { executeClaudeCommand, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       // Disable API fallback to force CLI usage
       initializeClaudeService({
         cliPath: '/usr/local/bin/claude',
@@ -601,9 +621,10 @@ describe('ClaudeService', () => {
         updatedAt: new Date().toISOString(),
       });
 
-      const { executeClaudeCommand, initializeClaudeService } =
+      const { executeClaudeCommand, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       // Disable API fallback to force CLI usage
       initializeClaudeService({
         cliPath: '/usr/local/bin/claude',
@@ -650,9 +671,10 @@ describe('ClaudeService', () => {
         },
       }));
 
-      const { executeClaudeCommand, initializeClaudeService } =
+      const { executeClaudeCommand, initializeClaudeService, clearInstallationCache } =
         await import('../../src/services/claude.service.js');
 
+      clearInstallationCache(); // Clear cache before testing
       initializeClaudeService({
         cliPath: '/nonexistent/claude',
         apiKey: 'sk-test-key',

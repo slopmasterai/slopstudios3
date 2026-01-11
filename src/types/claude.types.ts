@@ -71,6 +71,10 @@ export interface ClaudeProcessResult {
   error?: string;
   /** Parsed Claude response (if JSON output mode) */
   parsedResponse?: ClaudeParsedResponse;
+  /** Queue position (if status is 'queued') */
+  queuePosition?: number;
+  /** Estimated wait time in seconds (if status is 'queued') */
+  estimatedWaitSeconds?: number;
 }
 
 /**
@@ -187,6 +191,8 @@ export interface ClaudeProcessState {
   completedAt?: string;
   /** Current queue position (if queued) */
   queuePosition?: number;
+  /** Estimated wait time in seconds (if queued) */
+  estimatedWaitSeconds?: number;
   /** Accumulated stdout */
   stdout: string;
   /** Accumulated stderr */
@@ -407,6 +413,8 @@ export interface ClaudeQueuedPayload {
   processId: string;
   /** Queue position */
   queuePosition: number;
+  /** Estimated wait time in seconds */
+  estimatedWaitSeconds?: number;
   /** Message instructing client to poll */
   message: string;
   /** Timestamp */

@@ -143,6 +143,8 @@ export function registerClaudeRoutes(app: FastifyInstance): void {
             data: {
               processId: result.id,
               status: result.status,
+              queuePosition: result.queuePosition,
+              estimatedWaitSeconds: result.estimatedWaitSeconds,
               message: 'Request queued due to high load. Use async endpoint or poll for status.',
             },
             meta: {
@@ -167,6 +169,25 @@ export function registerClaudeRoutes(app: FastifyInstance): void {
             },
           };
           return await reply.status(429).send(response);
+        }
+
+        // Check for CLI-unavailable errors and respond with 503
+        if (result.status === 'failed' && result.error) {
+          const errorLower = result.error.toLowerCase();
+          if (errorLower.includes('not available') || errorLower.includes('not found')) {
+            const response: ApiResponse<null> = {
+              success: false,
+              error: {
+                code: 'SERVICE_UNAVAILABLE',
+                message: result.error,
+              },
+              meta: {
+                timestamp: timestamp(),
+                requestId: request.id,
+              },
+            };
+            return await reply.status(503).send(response);
+          }
         }
 
         const response: ApiResponse<ClaudeProcessResult> = {
@@ -293,6 +314,7 @@ export function registerClaudeRoutes(app: FastifyInstance): void {
             processId: result.processId,
             status: result.status,
             queuePosition: result.queuePosition,
+            estimatedWaitSeconds: result.estimatedWaitSeconds,
             message:
               result.status === 'queued'
                 ? 'Request queued due to high load. Poll /api/v1/claude/processes/:id for status.'

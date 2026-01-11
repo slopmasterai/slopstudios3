@@ -13,12 +13,14 @@ import {
   streamClaudeResponse,
   cancelClaudeProcess,
   getClaudeProcessStatus,
+  unsubscribeQueuedStream,
 } from '../../services/claude.service.js';
-import { getProcessState } from '../../services/process-manager.service.js';
+import { getProcessState, onProcessEvent } from '../../services/process-manager.service.js';
 import { getRedisClient, isRedisConnected } from '../../services/redis.service.js';
 import { generateRequestId } from '../../utils/index.js';
 import { logger } from '../../utils/logger.js';
 
+import type { ProcessEventData } from '../../services/process-manager.service.js';
 import type {
   ClaudeExecutePayload,
   ClaudeProgressPayload,
@@ -262,10 +264,14 @@ export function registerClaudeHandler(socket: TypedSocket): void {
       // Check if the result is queued - if so, emit queued event instead of complete
       // and do NOT unsubscribe yet; instruct client to poll for status
       if (result.status === 'queued') {
+        // Get the process state to retrieve queue position and ETA
+        const state = await getProcessState(processId);
+
         // Emit queued event to inform client to poll for status
         const queuedPayload: ClaudeQueuedPayload = {
           processId,
-          queuePosition: 0, // Will be updated via status polling
+          queuePosition: state?.queuePosition ?? 0,
+          estimatedWaitSeconds: state?.estimatedWaitSeconds,
           message: 'Request queued due to high load. Use claude:status to poll for completion.',
           timestamp: new Date().toISOString(),
         };
@@ -276,13 +282,26 @@ export function registerClaudeHandler(socket: TypedSocket): void {
         socket.to(processRoom).emit('claude:queued', queuedPayload);
 
         logger.info(
-          { socketId: socket.id, userId, processId },
-          'Claude request queued, client should poll for status'
+          {
+            socketId: socket.id,
+            userId,
+            processId,
+            queuePosition: state?.queuePosition,
+            estimatedWaitSeconds: state?.estimatedWaitSeconds,
+          },
+          'Claude request queued, waiting for process events'
         );
 
         // Wait for the queued process to complete
-        // Note: streamClaudeResponse handles its own subscription cleanup
-        await waitForQueuedProcessCompletion(socket, processId, processRoom);
+        // Pass the result so waitForQueuedProcessCompletion can:
+        // 1. Subscribe to process events for real-time stream forwarding
+        // 2. Clean up the stream subscription when done
+        await waitForQueuedProcessCompletion(
+          socket,
+          processId,
+          processRoom,
+          result as { status: string; _unsubscribe?: () => void }
+        );
         return;
       }
 
@@ -470,19 +489,84 @@ export function registerClaudeHandler(socket: TypedSocket): void {
 
 /**
  * Waits for a queued process to complete and emits appropriate events
- * Polls for process state changes and emits WebSocket events accordingly
+ * Subscribes to process events for real-time stream forwarding and polls as fallback
+ * @param queuedResult - The queued result from streamClaudeResponse (contains _unsubscribe)
  */
 async function waitForQueuedProcessCompletion(
   socket: TypedSocket,
   processId: string,
-  processRoom: string
+  processRoom: string,
+  queuedResult: { status: string; _unsubscribe?: () => void }
 ): Promise<void> {
   const maxWaitMs = 600000; // 10 minutes max wait
-  const pollIntervalMs = 1000; // Poll every second
+  const pollIntervalMs = 5000; // Poll every 5 seconds (less frequent since we have event subscription)
   const startTime = Date.now();
+  let processCompleted = false;
+  let lastStatus: string | null = null;
+
+  // IMPORTANT: Unsubscribe from the stream listener set up by streamClaudeResponse() BEFORE
+  // registering the onProcessEvent subscription below. This prevents duplicate event emissions
+  // since both listeners would otherwise forward the same process events to WebSocket clients.
+  if (queuedResult._unsubscribe) {
+    queuedResult._unsubscribe();
+    delete queuedResult._unsubscribe;
+  }
+  // Also try the exported function in case it was attached differently
+  unsubscribeQueuedStream(queuedResult as Parameters<typeof unsubscribeQueuedStream>[0]);
+
+  // Subscribe to process events to forward real-time stream data to WebSocket
+  const unsubscribeProcessEvents = onProcessEvent((event: ProcessEventData) => {
+    if (event.processId !== processId) {
+      return;
+    }
+
+    // Forward process events to WebSocket in real-time
+    switch (event.type) {
+      case 'start':
+        const startProgress: ClaudeProgressPayload = {
+          processId,
+          status: 'running',
+          message: 'Process started executing',
+          timestamp: event.timestamp,
+        };
+        socket.emit('claude:progress', startProgress);
+        socket.to(processRoom).emit('claude:progress', startProgress);
+        break;
+
+      case 'stdout':
+      case 'stderr':
+        const dataProgress: ClaudeProgressPayload = {
+          processId,
+          status: 'running',
+          data: event.data,
+          timestamp: event.timestamp,
+        };
+        socket.emit('claude:progress', dataProgress);
+        socket.to(processRoom).emit('claude:progress', dataProgress);
+        break;
+
+      case 'error':
+        const errorPayload: ClaudeErrorPayload = {
+          processId,
+          code: 'STREAM_ERROR',
+          message: event.error || 'Stream error occurred',
+          timestamp: event.timestamp,
+        };
+        socket.emit('claude:error', errorPayload);
+        socket.to(processRoom).emit('claude:error', errorPayload);
+        break;
+
+      case 'exit':
+      case 'timeout':
+        // Mark as completed - the polling loop will handle the final result emission
+        processCompleted = true;
+        break;
+    }
+  });
 
   try {
-    while (Date.now() - startTime < maxWaitMs) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- processCompleted is modified in event callback
+    while (Date.now() - startTime < maxWaitMs && !processCompleted) {
       // Check if socket is still connected
       if (!socket.connected) {
         logger.info(
@@ -492,7 +576,7 @@ async function waitForQueuedProcessCompletion(
         break;
       }
 
-      // Poll for process status
+      // Poll for process status (less frequent now since we have event subscription)
       const status = await getClaudeProcessStatus(processId);
 
       if (!status) {
@@ -537,24 +621,34 @@ async function waitForQueuedProcessCompletion(
         break;
       }
 
-      // Still queued or running, emit progress update if status changed
-      if (status.status === 'running') {
-        const progressPayload: ClaudeProgressPayload = {
-          processId,
-          status: 'running',
-          message: 'Process started executing',
-          timestamp: new Date().toISOString(),
-        };
-        socket.emit('claude:progress', progressPayload);
-      } else if (status.status === 'queued' && status.queuePosition !== undefined) {
-        // Emit queue position update
-        const queuedPayload: ClaudeQueuedPayload = {
-          processId,
-          queuePosition: status.queuePosition,
-          message: `Queue position: ${status.queuePosition}`,
-          timestamp: new Date().toISOString(),
-        };
-        socket.emit('claude:queued', queuedPayload);
+      // Emit status updates only when status changes (avoid duplicate emissions)
+      if (status.status !== lastStatus) {
+        lastStatus = status.status;
+
+        if (status.status === 'running') {
+          // Running status is emitted via the 'start' event subscription above
+          // Only emit here if we missed the event (e.g., status changed before subscription)
+          const progressPayload: ClaudeProgressPayload = {
+            processId,
+            status: 'running',
+            message: 'Process started executing',
+            timestamp: new Date().toISOString(),
+          };
+          socket.emit('claude:progress', progressPayload);
+        } else if (status.status === 'queued' && status.queuePosition !== undefined) {
+          // Get process state to retrieve ETA
+          const state = await getProcessState(processId);
+
+          // Emit queue position update with ETA
+          const queuedPayload: ClaudeQueuedPayload = {
+            processId,
+            queuePosition: status.queuePosition,
+            estimatedWaitSeconds: state?.estimatedWaitSeconds,
+            message: `Queue position: ${status.queuePosition}`,
+            timestamp: new Date().toISOString(),
+          };
+          socket.emit('claude:queued', queuedPayload);
+        }
       }
 
       // Wait before next poll
@@ -562,7 +656,8 @@ async function waitForQueuedProcessCompletion(
     }
 
     // Check if we timed out
-    if (Date.now() - startTime >= maxWaitMs) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- processCompleted is modified in event callback
+    if (Date.now() - startTime >= maxWaitMs && !processCompleted) {
       logger.warn({ processId }, 'Timed out waiting for queued process');
       const errorPayload: ClaudeErrorPayload = {
         processId,
@@ -573,6 +668,12 @@ async function waitForQueuedProcessCompletion(
       socket.emit('claude:error', errorPayload);
     }
   } finally {
+    // Clean up process event subscription
+    unsubscribeProcessEvents();
+
+    // Note: Stream subscription from queuedResult was already cleaned up at the start
+    // of this function to prevent duplicate event emissions.
+
     // Leave the process room
     socket.leave(processRoom);
   }

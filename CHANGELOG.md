@@ -10,11 +10,14 @@ and this project adheres to
 
 ### Added
 
-- N/A
+- `clearInstallationCache()` export in Claude service for cache management
 
 ### Changed
 
-- N/A
+- `validateClaudeInstallation()` now uses in-memory caching (60s TTL) to avoid
+  blocking `execSync` calls on every request
+- `getClaudeServiceHealth()` accepts optional `forceRefresh` parameter (default:
+  `true`) to control cache behavior
 
 ### Deprecated
 
@@ -26,7 +29,9 @@ and this project adheres to
 
 ### Fixed
 
-- N/A
+- Claude CLI availability check no longer blocks on every API call, reducing
+  latency for `executeClaudeCommand`, `enqueueClaudeCommand`, and
+  `isClaudeAvailable`
 
 ### Security
 

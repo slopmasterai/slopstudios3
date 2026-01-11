@@ -43,6 +43,18 @@ const inMemoryProcessStates = new Map<string, ClaudeProcessState>();
 const inMemoryQueue: ClaudeQueueItem[] = [];
 const inMemoryActiveIds = new Set<string>();
 
+// Redis key for average duration tracking
+const AVG_DURATION_KEY = 'process:avg_duration';
+
+// In-memory average duration tracking (fallback when Redis is unavailable)
+const inMemoryAvgDuration: { totalDurationMs: number; count: number } = {
+  totalDurationMs: 0,
+  count: 0,
+};
+
+// Default average duration in ms (used when no historical data exists)
+const DEFAULT_AVG_DURATION_MS = 30000; // 30 seconds
+
 /**
  * Process spawn options
  */
@@ -65,6 +77,8 @@ export interface SpawnOptions {
   captureOutput?: boolean;
   /** Maximum output buffer size in bytes */
   maxOutputSize?: number;
+  /** Content to write to stdin after spawning (then close stdin) */
+  stdinContent?: string;
 }
 
 /**
@@ -103,6 +117,7 @@ export async function spawnProcess(options: SpawnOptions): Promise<string> {
     timeoutMs = 300000,
     captureOutput = true,
     maxOutputSize = 10 * 1024 * 1024, // 10MB default
+    stdinContent,
   } = options;
 
   const redisAvailable = isRedisConnected();
@@ -156,6 +171,12 @@ export async function spawnProcess(options: SpawnOptions): Promise<string> {
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    // Write stdin content if provided, then close stdin
+    if (stdinContent && childProcess.stdin) {
+      childProcess.stdin.write(stdinContent, 'utf-8');
+      childProcess.stdin.end();
+    }
 
     // Store in memory for tracking
     activeProcesses.set(id, childProcess);
@@ -729,18 +750,28 @@ export async function getActiveProcessCount(): Promise<number> {
 }
 
 /**
+ * Result of enqueueing a process
+ */
+export interface EnqueueProcessResult {
+  /** Queue position (1-indexed) */
+  position: number;
+  /** Estimated wait time in seconds */
+  estimatedWaitSeconds: number;
+}
+
+/**
  * Enqueues a process for later execution
  * @param item - The queue item to enqueue
  * @param maxQueueSize - Maximum allowed queue size (0 = unlimited)
  * @param fullConfig - Optional full process config (used if no existing state)
- * @returns Queue position (1-indexed) or -1 if using in-memory fallback
+ * @returns EnqueueProcessResult with position and estimated wait time
  * @throws Error if queue is full (not if Redis is unavailable - uses in-memory fallback)
  */
 export async function enqueueProcess(
   item: ClaudeQueueItem,
   maxQueueSize: number = 0,
   fullConfig?: ClaudeProcessConfig
-): Promise<number> {
+): Promise<EnqueueProcessResult> {
   // Build the state object first (used for both Redis and in-memory)
   const existingState = await getProcessState(item.processId);
   let state: ClaudeProcessState;
@@ -778,6 +809,9 @@ export async function enqueueProcess(
     };
   }
 
+  // Get average duration for ETA calculation
+  const avgDurationMs = await getAverageProcessDuration();
+
   // Fallback to in-memory queue when Redis is unavailable
   if (!isRedisConnected()) {
     logger.warn({ processId: item.processId }, 'Redis unavailable, using in-memory queue');
@@ -786,9 +820,6 @@ export async function enqueueProcess(
     if (maxQueueSize > 0 && inMemoryQueue.length >= maxQueueSize) {
       throw new Error(`Queue is full (max size: ${maxQueueSize}). Try again later.`);
     }
-
-    // Store state in memory
-    inMemoryProcessStates.set(item.processId, state);
 
     // Add to in-memory queue (sorted by priority then timestamp)
     inMemoryQueue.push(item);
@@ -800,13 +831,31 @@ export async function enqueueProcess(
     });
 
     // Find position in sorted queue
-    const position = inMemoryQueue.findIndex((i) => i.processId === item.processId);
+    const positionIndex = inMemoryQueue.findIndex((i) => i.processId === item.processId);
+    const position = positionIndex + 1;
+
+    // Compute ETA
+    const estimatedWaitSeconds = computeEstimatedWaitSeconds(position, avgDurationMs);
+
+    // Update state with queue position and ETA
+    state.queuePosition = position;
+    state.estimatedWaitSeconds = estimatedWaitSeconds;
+
+    // Store state in memory
+    inMemoryProcessStates.set(item.processId, state);
+
     logger.info(
-      { processId: item.processId, userId: item.userId, position: position + 1, inMemory: true },
+      {
+        processId: item.processId,
+        userId: item.userId,
+        position,
+        estimatedWaitSeconds,
+        inMemory: true,
+      },
       'Process enqueued (in-memory)'
     );
 
-    return position + 1;
+    return { position, estimatedWaitSeconds };
   }
 
   try {
@@ -820,19 +869,31 @@ export async function enqueueProcess(
       }
     }
 
-    await redis.setex(getProcessKey(item.processId), PROCESS_TTL_SECONDS, JSON.stringify(state));
-
     // Add to queue using sorted set (score = priority * -1 for descending order, then timestamp)
     // Higher priority = processed first, same priority = FIFO
     const score = -item.priority * 1e15 + Date.parse(item.enqueuedAt);
     await redis.zadd(PROCESS_QUEUE_KEY, score, JSON.stringify(item));
 
     // Get queue position
-    const position = await redis.zrank(PROCESS_QUEUE_KEY, JSON.stringify(item));
+    const positionRank = await redis.zrank(PROCESS_QUEUE_KEY, JSON.stringify(item));
+    const position = positionRank !== null ? positionRank + 1 : 1;
 
-    logger.info({ processId: item.processId, userId: item.userId, position }, 'Process enqueued');
+    // Compute ETA
+    const estimatedWaitSeconds = computeEstimatedWaitSeconds(position, avgDurationMs);
 
-    return position !== null ? position + 1 : 1;
+    // Update state with queue position and ETA
+    state.queuePosition = position;
+    state.estimatedWaitSeconds = estimatedWaitSeconds;
+
+    // Store state in Redis
+    await redis.setex(getProcessKey(item.processId), PROCESS_TTL_SECONDS, JSON.stringify(state));
+
+    logger.info(
+      { processId: item.processId, userId: item.userId, position, estimatedWaitSeconds },
+      'Process enqueued'
+    );
+
+    return { position, estimatedWaitSeconds };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error({ processId: item.processId, error: errorMessage }, 'Failed to enqueue process');
@@ -980,6 +1041,101 @@ export async function getQueuePosition(processId: string): Promise<number | null
 }
 
 /**
+ * Records a process duration for average calculation
+ * Uses exponential moving average to weight recent durations more heavily
+ */
+export async function recordProcessDuration(durationMs: number): Promise<void> {
+  if (durationMs <= 0) {
+    return;
+  }
+
+  if (!isRedisConnected()) {
+    // Update in-memory average
+    inMemoryAvgDuration.totalDurationMs += durationMs;
+    inMemoryAvgDuration.count += 1;
+    return;
+  }
+
+  try {
+    const redis = getRedisClient();
+    const data = await redis.get(AVG_DURATION_KEY);
+
+    let avgData: { totalDurationMs: number; count: number };
+    if (data) {
+      avgData = JSON.parse(data) as { totalDurationMs: number; count: number };
+    } else {
+      avgData = { totalDurationMs: 0, count: 0 };
+    }
+
+    avgData.totalDurationMs += durationMs;
+    avgData.count += 1;
+
+    // Store with long TTL (7 days)
+    await redis.setex(AVG_DURATION_KEY, 604800, JSON.stringify(avgData));
+  } catch (error) {
+    // Fallback to in-memory on error
+    inMemoryAvgDuration.totalDurationMs += durationMs;
+    inMemoryAvgDuration.count += 1;
+    logger.warn({ error }, 'Failed to record process duration in Redis, using in-memory fallback');
+  }
+}
+
+/**
+ * Gets the average process duration in milliseconds
+ */
+export async function getAverageProcessDuration(): Promise<number> {
+  if (!isRedisConnected()) {
+    // Use in-memory average
+    if (inMemoryAvgDuration.count > 0) {
+      return Math.round(inMemoryAvgDuration.totalDurationMs / inMemoryAvgDuration.count);
+    }
+    return DEFAULT_AVG_DURATION_MS;
+  }
+
+  try {
+    const redis = getRedisClient();
+    const data = await redis.get(AVG_DURATION_KEY);
+
+    if (data) {
+      const avgData = JSON.parse(data) as { totalDurationMs: number; count: number };
+      if (avgData.count > 0) {
+        return Math.round(avgData.totalDurationMs / avgData.count);
+      }
+    }
+
+    // Fallback to in-memory if Redis has no data
+    if (inMemoryAvgDuration.count > 0) {
+      return Math.round(inMemoryAvgDuration.totalDurationMs / inMemoryAvgDuration.count);
+    }
+
+    return DEFAULT_AVG_DURATION_MS;
+  } catch (error) {
+    // Fallback to in-memory on error
+    if (inMemoryAvgDuration.count > 0) {
+      return Math.round(inMemoryAvgDuration.totalDurationMs / inMemoryAvgDuration.count);
+    }
+    return DEFAULT_AVG_DURATION_MS;
+  }
+}
+
+/**
+ * Computes estimated wait time in seconds based on queue position and average duration
+ * @param queuePosition - Position in queue (1-indexed)
+ * @param avgDurationMs - Average process duration in milliseconds
+ * @returns Estimated wait time in seconds
+ */
+export function computeEstimatedWaitSeconds(queuePosition: number, avgDurationMs: number): number {
+  if (queuePosition <= 0) {
+    return 0;
+  }
+
+  // ETA = queue position * average duration
+  // Convert from ms to seconds and round up
+  const estimatedWaitMs = queuePosition * avgDurationMs;
+  return Math.ceil(estimatedWaitMs / 1000);
+}
+
+/**
  * Cleans up zombie processes (processes marked as running but not in memory)
  */
 export async function cleanupZombieProcesses(): Promise<number> {
@@ -1111,6 +1267,9 @@ export default {
   removeFromQueue,
   getQueueSize,
   getQueuePosition,
+  recordProcessDuration,
+  getAverageProcessDuration,
+  computeEstimatedWaitSeconds,
   cleanupZombieProcesses,
   terminateAllProcesses,
   waitForProcesses,

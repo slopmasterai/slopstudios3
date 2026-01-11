@@ -30,6 +30,8 @@ import {
   getQueuePosition,
   getActiveProcessCount,
   onProcessEvent,
+  getProcessEmitter,
+  recordProcessDuration,
   type SpawnOptions,
   type ProcessEventData,
 } from './process-manager.service.js';
@@ -81,6 +83,16 @@ const activeStreamSessions = new Map<
 // Queue worker state
 let queueWorkerRunning = false;
 let queueWorkerInterval: NodeJS.Timeout | null = null;
+
+// In-memory cache for CLI installation status to avoid blocking execSync calls
+const INSTALLATION_CACHE_TTL_MS = 60000; // 60 seconds default
+let installationStatusCache: {
+  status: ClaudeInstallationStatus;
+  timestamp: number;
+} | null = null;
+
+// Counter for in-flight API executions (tracked against same concurrency limit as CLI)
+let inFlightApiExecutions = 0;
 
 // Retryable exit codes (transient failures)
 const RETRYABLE_EXIT_CODES = new Set([
@@ -144,6 +156,14 @@ function calculateBackoffDelay(attempt: number, baseDelayMs: number): number {
 }
 
 /**
+ * Emits a process event for API fallback executions
+ * This ensures stream listeners and status polling observe the correct state
+ */
+function emitApiProcessEvent(event: ProcessEventData): void {
+  getProcessEmitter().emit('process', event);
+}
+
+/**
  * Initializes the Claude service with configuration
  */
 export function initializeClaudeService(config?: Partial<ClaudeServiceConfig>): void {
@@ -159,8 +179,10 @@ export function initializeClaudeService(config?: Partial<ClaudeServiceConfig>): 
     logger.info('Anthropic SDK client initialized for API fallback');
   }
 
-  // Start queue worker
-  startQueueWorker();
+  // Start queue worker only if queueing is enabled
+  if (serviceConfig.enableQueue) {
+    startQueueWorker();
+  }
 
   logger.info(
     {
@@ -175,45 +197,65 @@ export function initializeClaudeService(config?: Partial<ClaudeServiceConfig>): 
 }
 
 /**
- * Validates Claude CLI installation
+ * Validates Claude CLI installation with in-memory caching to avoid blocking execSync calls.
+ * @param forceRefresh - If true, bypasses the cache and performs a fresh check (useful for health checks)
  */
-export function validateClaudeInstallation(): ClaudeInstallationStatus {
+export function validateClaudeInstallation(forceRefresh = false): ClaudeInstallationStatus {
+  // Check if we have a valid cached result
+  if (!forceRefresh && installationStatusCache) {
+    const cacheAge = Date.now() - installationStatusCache.timestamp;
+    if (cacheAge < INSTALLATION_CACHE_TTL_MS) {
+      return installationStatusCache.status;
+    }
+  }
+
+  // Perform the actual validation
+  let status: ClaudeInstallationStatus;
+
   try {
     // Check if path exists
     if (!existsSync(serviceConfig.cliPath)) {
-      return {
+      status = {
         installed: false,
         error: `Claude CLI not found at ${serviceConfig.cliPath}`,
       };
-    }
+    } else {
+      // Try to get version
+      try {
+        const versionOutput = execSync(`"${serviceConfig.cliPath}" --version`, {
+          timeout: 5000,
+          encoding: 'utf-8',
+        }).trim();
 
-    // Try to get version
-    try {
-      const versionOutput = execSync(`"${serviceConfig.cliPath}" --version`, {
-        timeout: 5000,
-        encoding: 'utf-8',
-      }).trim();
-
-      return {
-        installed: true,
-        path: serviceConfig.cliPath,
-        version: versionOutput,
-      };
-    } catch {
-      // CLI exists but version check failed (might still work)
-      return {
-        installed: true,
-        path: serviceConfig.cliPath,
-        version: 'unknown',
-      };
+        status = {
+          installed: true,
+          path: serviceConfig.cliPath,
+          version: versionOutput,
+        };
+      } catch {
+        // CLI exists but version check failed (might still work)
+        status = {
+          installed: true,
+          path: serviceConfig.cliPath,
+          version: 'unknown',
+        };
+      }
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return {
+    status = {
       installed: false,
       error: errorMessage,
     };
   }
+
+  // Update the cache
+  installationStatusCache = {
+    status,
+    timestamp: Date.now(),
+  };
+
+  return status;
 }
 
 /**
@@ -265,6 +307,18 @@ export async function executeClaudeCommand(
   const rateLimitResult = await checkRateLimit(config.userId);
   if (!rateLimitResult.allowed) {
     logger.warn({ processId, userId: config.userId }, 'Rate limit exceeded');
+    const createdAt = new Date().toISOString();
+    const rateLimitError = 'Rate limit exceeded. Try again later.';
+
+    // Persist failed state so status polling reports the failure
+    await updateProcessState(processId, {
+      config: { ...config, id: processId },
+      status: 'failed',
+      error: rateLimitError,
+      createdAt,
+      completedAt: createdAt,
+    });
+
     return {
       id: processId,
       userId: config.userId,
@@ -272,10 +326,10 @@ export async function executeClaudeCommand(
       stdout: '',
       stderr: '',
       exitCode: null,
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
+      startedAt: createdAt,
+      completedAt: createdAt,
       durationMs: 0,
-      error: 'Rate limit exceeded. Try again later.',
+      error: rateLimitError,
     };
   }
 
@@ -285,9 +339,62 @@ export async function executeClaudeCommand(
   // If CLI not available, try API fallback
   if (!cliStatus.installed) {
     if (serviceConfig.useApiFallback && anthropicClient) {
+      // Check concurrency limit (including in-flight API executions)
+      const activeCount = await getActiveProcessCount();
+      const totalActive = activeCount + inFlightApiExecutions;
+      if (totalActive >= serviceConfig.maxConcurrentProcesses) {
+        if (serviceConfig.enableQueue) {
+          // Enqueue for later execution
+          return await enqueueForExecution(config, processId);
+        }
+
+        const createdAt = new Date().toISOString();
+        const concurrencyError = 'Maximum concurrent processes reached. Try again later.';
+
+        // Persist failed state so status polling reports the failure
+        await updateProcessState(processId, {
+          config: { ...config, id: processId },
+          status: 'failed',
+          error: concurrencyError,
+          createdAt,
+          completedAt: createdAt,
+        });
+
+        return {
+          id: processId,
+          userId: config.userId,
+          status: 'failed',
+          stdout: '',
+          stderr: '',
+          exitCode: null,
+          startedAt: createdAt,
+          completedAt: createdAt,
+          durationMs: 0,
+          error: concurrencyError,
+        };
+      }
+
       logger.info({ processId }, 'Claude CLI not available, using API fallback');
-      return await executeViaApi(config, processId, startTime);
+      inFlightApiExecutions++;
+      try {
+        return await executeViaApi(config, processId, startTime);
+      } finally {
+        inFlightApiExecutions--;
+      }
     }
+
+    const createdAt = new Date().toISOString();
+    const cliUnavailableError =
+      cliStatus.error ?? 'Claude CLI not available and no API fallback configured';
+
+    // Persist failed state so status polling reports the failure
+    await updateProcessState(processId, {
+      config: { ...config, id: processId },
+      status: 'failed',
+      error: cliUnavailableError,
+      createdAt,
+      completedAt: createdAt,
+    });
 
     return {
       id: processId,
@@ -296,20 +403,32 @@ export async function executeClaudeCommand(
       stdout: '',
       stderr: '',
       exitCode: null,
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
+      startedAt: createdAt,
+      completedAt: createdAt,
       durationMs: 0,
-      error: cliStatus.error ?? 'Claude CLI not available and no API fallback configured',
+      error: cliUnavailableError,
     };
   }
 
   // Check concurrency limit
   const activeCount = await getActiveProcessCount();
-  if (activeCount >= serviceConfig.maxConcurrentProcesses) {
+  if (activeCount + inFlightApiExecutions >= serviceConfig.maxConcurrentProcesses) {
     if (serviceConfig.enableQueue) {
       // Enqueue for later execution
       return await enqueueForExecution(config, processId);
     }
+
+    const createdAt = new Date().toISOString();
+    const concurrencyError = 'Maximum concurrent processes reached. Try again later.';
+
+    // Persist failed state so status polling reports the failure
+    await updateProcessState(processId, {
+      config: { ...config, id: processId },
+      status: 'failed',
+      error: concurrencyError,
+      createdAt,
+      completedAt: createdAt,
+    });
 
     return {
       id: processId,
@@ -318,10 +437,10 @@ export async function executeClaudeCommand(
       stdout: '',
       stderr: '',
       exitCode: null,
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
+      startedAt: createdAt,
+      completedAt: createdAt,
       durationMs: 0,
-      error: 'Maximum concurrent processes reached. Try again later.',
+      error: concurrencyError,
     };
   }
 
@@ -382,6 +501,7 @@ async function executeViaCli(
       env: config.env,
       timeoutMs: config.timeoutMs ?? serviceConfig.defaultTimeoutMs,
       captureOutput: true,
+      stdinContent: config.prompt, // Pass prompt via stdin to avoid E2BIG for large prompts
     };
 
     // Update config in process state
@@ -461,6 +581,11 @@ async function executeViaCli(
         success: result.status === 'completed',
         timestamp: new Date().toISOString(),
       });
+
+      // Record duration for ETA calculation (only for successful completions)
+      if (result.status === 'completed') {
+        await recordProcessDuration(durationMs);
+      }
 
       // Update process state with final result
       await updateProcessState(processId, {
@@ -644,7 +769,33 @@ async function executeViaApi(
   processId: string,
   startTime: number
 ): Promise<ClaudeProcessResult> {
+  const startedAt = new Date(startTime).toISOString();
+
   if (!anthropicClient) {
+    const completedAt = new Date().toISOString();
+    const errorMsg = 'Anthropic API client not initialized';
+
+    // Update process state with failure
+    await updateProcessState(processId, {
+      status: 'failed',
+      stdout: '',
+      stderr: '',
+      exitCode: undefined,
+      startedAt,
+      completedAt,
+      error: errorMsg,
+      config: { ...config, id: processId },
+    });
+
+    // Emit error event
+    emitApiProcessEvent({
+      processId,
+      userId: config.userId,
+      type: 'error',
+      error: errorMsg,
+      timestamp: completedAt,
+    });
+
     return {
       id: processId,
       userId: config.userId,
@@ -652,10 +803,10 @@ async function executeViaApi(
       stdout: '',
       stderr: '',
       exitCode: null,
-      startedAt: new Date(startTime).toISOString(),
-      completedAt: new Date().toISOString(),
+      startedAt,
+      completedAt,
       durationMs: Date.now() - startTime,
-      error: 'Anthropic API client not initialized',
+      error: errorMsg,
     };
   }
 
@@ -663,6 +814,20 @@ async function executeViaApi(
   const baseDelayMs = serviceConfig.retryDelayMs;
   let lastError: string = '';
   let attempt = 0;
+
+  // Update process state to running before first API call and emit start event
+  await updateProcessState(processId, {
+    status: 'running',
+    startedAt,
+    config: { ...config, id: processId },
+  });
+
+  emitApiProcessEvent({
+    processId,
+    userId: config.userId,
+    type: 'start',
+    timestamp: startedAt,
+  });
 
   while (attempt <= maxRetries) {
     if (attempt > 0) {
@@ -689,6 +854,7 @@ async function executeViaApi(
         .join('\n');
 
       const durationMs = Date.now() - startTime;
+      const completedAt = new Date().toISOString();
 
       // Record metrics for successful API execution
       recordProcessMetrics({
@@ -698,7 +864,29 @@ async function executeViaApi(
         inputSize: config.prompt.length,
         outputSize: textContent.length,
         success: true,
-        timestamp: new Date().toISOString(),
+        timestamp: completedAt,
+      });
+
+      // Record duration for ETA calculation
+      await recordProcessDuration(durationMs);
+
+      // Update process state to completed
+      await updateProcessState(processId, {
+        status: 'completed',
+        stdout: textContent,
+        stderr: '',
+        exitCode: 0,
+        completedAt,
+        error: undefined,
+      });
+
+      // Emit exit event for successful completion
+      emitApiProcessEvent({
+        processId,
+        userId: config.userId,
+        type: 'exit',
+        exitCode: 0,
+        timestamp: completedAt,
       });
 
       return {
@@ -708,8 +896,8 @@ async function executeViaApi(
         stdout: textContent,
         stderr: '',
         exitCode: 0,
-        startedAt: new Date(startTime).toISOString(),
-        completedAt: new Date().toISOString(),
+        startedAt,
+        completedAt,
         durationMs,
         parsedResponse: {
           content: textContent,
@@ -749,6 +937,9 @@ async function executeViaApi(
       );
 
       const failedDurationMs = Date.now() - startTime;
+      const completedAt = new Date().toISOString();
+      const finalError =
+        attempt > 0 ? `${errorMessage} (after ${String(attempt + 1)} attempts)` : errorMessage;
 
       // Record metrics for failed API execution
       recordProcessMetrics({
@@ -758,7 +949,26 @@ async function executeViaApi(
         inputSize: config.prompt.length,
         outputSize: 0,
         success: false,
-        timestamp: new Date().toISOString(),
+        timestamp: completedAt,
+      });
+
+      // Update process state to failed
+      await updateProcessState(processId, {
+        status: 'failed',
+        stdout: '',
+        stderr: '',
+        exitCode: undefined,
+        completedAt,
+        error: finalError,
+      });
+
+      // Emit error event
+      emitApiProcessEvent({
+        processId,
+        userId: config.userId,
+        type: 'error',
+        error: finalError,
+        timestamp: completedAt,
       });
 
       return {
@@ -768,17 +978,18 @@ async function executeViaApi(
         stdout: '',
         stderr: '',
         exitCode: null,
-        startedAt: new Date(startTime).toISOString(),
-        completedAt: new Date().toISOString(),
+        startedAt,
+        completedAt,
         durationMs: failedDurationMs,
-        error:
-          attempt > 0 ? `${errorMessage} (after ${String(attempt + 1)} attempts)` : errorMessage,
+        error: finalError,
       };
     }
   }
 
   // This should only be reached if all retries exhausted
   const finalDurationMs = Date.now() - startTime;
+  const completedAt = new Date().toISOString();
+  const finalError = `${lastError ?? 'Unknown error'} (after ${String(maxRetries + 1)} attempts)`;
 
   // Record metrics for final failure
   recordProcessMetrics({
@@ -788,7 +999,26 @@ async function executeViaApi(
     inputSize: config.prompt.length,
     outputSize: 0,
     success: false,
-    timestamp: new Date().toISOString(),
+    timestamp: completedAt,
+  });
+
+  // Update process state to failed
+  await updateProcessState(processId, {
+    status: 'failed',
+    stdout: '',
+    stderr: '',
+    exitCode: undefined,
+    completedAt,
+    error: finalError,
+  });
+
+  // Emit error event
+  emitApiProcessEvent({
+    processId,
+    userId: config.userId,
+    type: 'error',
+    error: finalError,
+    timestamp: completedAt,
   });
 
   return {
@@ -798,10 +1028,10 @@ async function executeViaApi(
     stdout: '',
     stderr: '',
     exitCode: null,
-    startedAt: new Date(startTime).toISOString(),
-    completedAt: new Date().toISOString(),
+    startedAt,
+    completedAt,
     durationMs: finalDurationMs,
-    error: `${lastError ?? 'Unknown error'} (after ${String(maxRetries + 1)} attempts)`,
+    error: finalError,
   };
 }
 
@@ -820,18 +1050,22 @@ async function enqueueForExecution(
   };
 
   try {
-    const position = await enqueueProcess(queueItem, serviceConfig.maxQueueSize);
-
-    // Store config for later
-    await updateProcessState(processId, {
-      config: { ...config, id: processId },
-      status: 'queued',
-      queuePosition: position,
+    // enqueueProcess now returns { position, estimatedWaitSeconds }
+    const enqueueResult = await enqueueProcess(queueItem, serviceConfig.maxQueueSize, {
+      ...config,
+      id: processId,
     });
 
-    logger.info({ processId, position }, 'Process enqueued');
+    logger.info(
+      {
+        processId,
+        position: enqueueResult.position,
+        estimatedWaitSeconds: enqueueResult.estimatedWaitSeconds,
+      },
+      'Process enqueued'
+    );
 
-    // Return a "queued" result
+    // Return a "queued" result with queue position and estimated wait time
     return {
       id: processId,
       userId: config.userId,
@@ -842,6 +1076,8 @@ async function enqueueForExecution(
       startedAt: '',
       completedAt: '',
       durationMs: 0,
+      queuePosition: enqueueResult.position,
+      estimatedWaitSeconds: enqueueResult.estimatedWaitSeconds,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -867,6 +1103,8 @@ export interface EnqueueResult {
   processId: string;
   status: 'pending' | 'queued' | 'running' | 'failed';
   queuePosition?: number;
+  /** Estimated wait time in seconds (for queued processes) */
+  estimatedWaitSeconds?: number;
   error?: string;
 }
 
@@ -926,9 +1164,10 @@ export async function enqueueClaudeCommand(config: ClaudeProcessConfig): Promise
     };
   }
 
-  // Check concurrency limit
+  // Check concurrency limit (including in-flight API executions)
   const activeCount = await getActiveProcessCount();
-  if (activeCount >= serviceConfig.maxConcurrentProcesses) {
+  const totalActive = activeCount + inFlightApiExecutions;
+  if (totalActive >= serviceConfig.maxConcurrentProcesses) {
     if (serviceConfig.enableQueue) {
       // Enqueue for later execution by queue worker
       const queueItem: ClaudeQueueItem = {
@@ -939,22 +1178,26 @@ export async function enqueueClaudeCommand(config: ClaudeProcessConfig): Promise
       };
 
       try {
-        const position = await enqueueProcess(queueItem, serviceConfig.maxQueueSize);
-
-        // Store config for later execution by queue worker
-        await updateProcessState(processId, {
-          config: { ...config, id: processId },
-          status: 'queued',
-          queuePosition: position,
-          createdAt,
+        // enqueueProcess now returns { position, estimatedWaitSeconds }
+        const enqueueResult = await enqueueProcess(queueItem, serviceConfig.maxQueueSize, {
+          ...config,
+          id: processId,
         });
 
-        logger.info({ processId, position }, 'Process enqueued due to concurrency limit');
+        logger.info(
+          {
+            processId,
+            position: enqueueResult.position,
+            estimatedWaitSeconds: enqueueResult.estimatedWaitSeconds,
+          },
+          'Process enqueued due to concurrency limit'
+        );
 
         return {
           processId,
           status: 'queued',
-          queuePosition: position,
+          queuePosition: enqueueResult.position,
+          estimatedWaitSeconds: enqueueResult.estimatedWaitSeconds,
         };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -1007,7 +1250,8 @@ export async function enqueueClaudeCommand(config: ClaudeProcessConfig): Promise
   const startTime = Date.now();
 
   if (!cliStatus.installed && serviceConfig.useApiFallback && anthropicClient) {
-    // Use API fallback
+    // Use API fallback - track in-flight execution against concurrency limit
+    inFlightApiExecutions++;
     executeViaApi(config, processId, startTime)
       .then((result) => {
         logger.info(
@@ -1020,6 +1264,9 @@ export async function enqueueClaudeCommand(config: ClaudeProcessConfig): Promise
           { processId, error: error instanceof Error ? error.message : 'Unknown error' },
           'Fire-and-forget API execution failed'
         );
+      })
+      .finally(() => {
+        inFlightApiExecutions--;
       });
   } else {
     // Use CLI
@@ -1046,14 +1293,13 @@ export async function enqueueClaudeCommand(config: ClaudeProcessConfig): Promise
 }
 
 /**
- * Builds CLI arguments from config
+ * Builds CLI arguments from config (prompt is passed via stdin, not as arg)
  */
 function buildCliArgs(config: ClaudeProcessConfig): string[] {
   const args: string[] = [];
 
-  // Add prompt (via stdin would be better, but this works for basic cases)
+  // Use --print flag for single-shot execution with stdin prompt
   args.push('--print');
-  args.push(config.prompt);
 
   // Add model if specified
   if (config.model) {
@@ -1295,6 +1541,8 @@ export function subscribeToStream(processId: string, listener: StreamListener): 
 
 /**
  * Streams Claude response in real-time
+ * When the result is 'queued', the subscription is kept alive and attached to the result.
+ * Caller should call unsubscribeQueuedStream() when the queued job completes.
  */
 export async function streamClaudeResponse(
   config: ClaudeProcessConfig,
@@ -1305,6 +1553,8 @@ export async function streamClaudeResponse(
   // Subscribe to events before starting
   const unsubscribe = subscribeToStream(processId, onEvent);
 
+  let shouldUnsubscribe = true;
+
   try {
     // Execute with streaming enabled
     const result = await executeClaudeCommand({
@@ -1313,9 +1563,36 @@ export async function streamClaudeResponse(
       stream: true,
     });
 
+    // If the job is queued, don't unsubscribe - the caller needs to keep the
+    // subscription alive to receive events when the job starts running.
+    // Store the unsubscribe function in the result so caller can clean up later.
+    if (result.status === 'queued') {
+      // Attach unsubscribe to result for caller to manage
+      (result as ClaudeProcessResult & { _unsubscribe?: () => void })._unsubscribe = unsubscribe;
+      shouldUnsubscribe = false;
+      return result;
+    }
+
     return result;
   } finally {
-    unsubscribe();
+    // Only unsubscribe if the job was NOT queued
+    // For queued jobs, the caller is responsible for calling unsubscribeQueuedStream()
+    if (shouldUnsubscribe) {
+      unsubscribe();
+    }
+  }
+}
+
+/**
+ * Unsubscribes from a queued stream result
+ * Call this when the queued job completes or errors
+ */
+export function unsubscribeQueuedStream(result: ClaudeProcessResult): void {
+  const unsubscribeFn = (result as ClaudeProcessResult & { _unsubscribe?: () => void })
+    ._unsubscribe;
+  if (unsubscribeFn) {
+    unsubscribeFn();
+    delete (result as ClaudeProcessResult & { _unsubscribe?: () => void })._unsubscribe;
   }
 }
 
@@ -1375,8 +1652,9 @@ export async function getClaudeProcessStatus(processId: string): Promise<{
 
 /**
  * Gets service health status
+ * @param forceRefresh - If true, bypasses CLI installation cache for fresh status (default: true for health checks)
  */
-export async function getClaudeServiceHealth(): Promise<{
+export async function getClaudeServiceHealth(forceRefresh = true): Promise<{
   healthy: boolean;
   cli: ClaudeInstallationStatus;
   apiFallbackAvailable: boolean;
@@ -1384,7 +1662,8 @@ export async function getClaudeServiceHealth(): Promise<{
   queueSize: number;
   maxConcurrentProcesses: number;
 }> {
-  const cliStatus = validateClaudeInstallation();
+  // Health checks should use fresh data by default to provide accurate status
+  const cliStatus = validateClaudeInstallation(forceRefresh);
   const activeProcesses = await getActiveProcessCount();
   const queueSize = await getQueueSize();
 
@@ -1402,6 +1681,12 @@ export async function getClaudeServiceHealth(): Promise<{
  * Starts the queue worker
  */
 function startQueueWorker(): void {
+  // Don't start if queueing is disabled
+  if (!serviceConfig.enableQueue) {
+    logger.debug('Queue worker not started: queueing is disabled');
+    return;
+  }
+
   if (queueWorkerRunning) {
     return;
   }
@@ -1438,8 +1723,9 @@ async function processQueue(): Promise<void> {
   try {
     const activeCount = await getActiveProcessCount();
 
-    // Check if we have capacity
-    if (activeCount >= serviceConfig.maxConcurrentProcesses) {
+    // Check if we have capacity (including in-flight API executions)
+    const totalActive = activeCount + inFlightApiExecutions;
+    if (totalActive >= serviceConfig.maxConcurrentProcesses) {
       return;
     }
 
@@ -1465,12 +1751,24 @@ async function processQueue(): Promise<void> {
         'Rate limit exceeded for dequeued process'
       );
 
+      const completedAt = new Date().toISOString();
+      const rateLimitError =
+        'Rate limit exceeded. Process was queued but could not be executed due to rate limiting.';
+
       // Mark the process as failed with rate limit error
       await updateProcessState(item.processId, {
         status: 'failed',
-        error:
-          'Rate limit exceeded. Process was queued but could not be executed due to rate limiting.',
-        completedAt: new Date().toISOString(),
+        error: rateLimitError,
+        completedAt,
+      });
+
+      // Emit error event so stream listeners and status polling observe the failure
+      emitApiProcessEvent({
+        processId: item.processId,
+        userId: item.userId,
+        type: 'error',
+        error: rateLimitError,
+        timestamp: completedAt,
       });
 
       // Record metrics for the rate-limited process
@@ -1481,7 +1779,7 @@ async function processQueue(): Promise<void> {
         inputSize: state.config.prompt?.length ?? 0,
         outputSize: 0,
         success: false,
-        timestamp: new Date().toISOString(),
+        timestamp: completedAt,
       });
 
       return;
@@ -1502,7 +1800,8 @@ async function processQueue(): Promise<void> {
           'CLI not available for queued item, using API fallback'
         );
 
-        // Execute via API fallback in background (don't await)
+        // Execute via API fallback in background (don't await) - track in-flight execution
+        inFlightApiExecutions++;
         executeViaApi(state.config, item.processId, startTime)
           .then((result) => {
             logger.info(
@@ -1518,6 +1817,9 @@ async function processQueue(): Promise<void> {
               },
               'Queued process failed via API fallback'
             );
+          })
+          .finally(() => {
+            inFlightApiExecutions--;
           });
       } else {
         // No CLI and no API fallback available - update process state with failure
@@ -1526,10 +1828,23 @@ async function processQueue(): Promise<void> {
           'CLI not available and no API fallback configured for queued item'
         );
 
+        const completedAt = new Date().toISOString();
+        const noFallbackError =
+          cliStatus.error ?? 'Claude CLI not available and no API fallback configured';
+
         await updateProcessState(item.processId, {
           status: 'failed',
-          error: cliStatus.error ?? 'Claude CLI not available and no API fallback configured',
-          completedAt: new Date().toISOString(),
+          error: noFallbackError,
+          completedAt,
+        });
+
+        // Emit error event so stream listeners and status polling observe the failure
+        emitApiProcessEvent({
+          processId: item.processId,
+          userId: item.userId,
+          type: 'error',
+          error: noFallbackError,
+          timestamp: completedAt,
         });
       }
     } else {
@@ -1565,6 +1880,7 @@ export function getServiceConfig(): ClaudeServiceConfig {
  * Updates service configuration
  */
 export function updateServiceConfig(config: Partial<ClaudeServiceConfig>): void {
+  const previousEnableQueue = serviceConfig.enableQueue;
   serviceConfig = { ...serviceConfig, ...config };
 
   // Reinitialize Anthropic client if API key changed
@@ -1578,7 +1894,26 @@ export function updateServiceConfig(config: Partial<ClaudeServiceConfig>): void 
     }
   }
 
+  // Handle queue worker state changes when enableQueue is toggled
+  if (config.enableQueue !== undefined && config.enableQueue !== previousEnableQueue) {
+    if (serviceConfig.enableQueue) {
+      // Queue was enabled, start the worker
+      startQueueWorker();
+    } else {
+      // Queue was disabled, stop the worker
+      stopQueueWorker();
+    }
+  }
+
   logger.info('Claude service configuration updated');
+}
+
+/**
+ * Clears the installation status cache.
+ * Primarily used for testing to ensure clean state between test runs.
+ */
+export function clearInstallationCache(): void {
+  installationStatusCache = null;
 }
 
 export default {
@@ -1588,6 +1923,7 @@ export default {
   executeClaudeCommand,
   enqueueClaudeCommand,
   streamClaudeResponse,
+  unsubscribeQueuedStream,
   cancelClaudeProcess,
   getClaudeProcessStatus,
   getClaudeServiceHealth,
@@ -1596,4 +1932,5 @@ export default {
   stopQueueWorker,
   getServiceConfig,
   updateServiceConfig,
+  clearInstallationCache,
 };
