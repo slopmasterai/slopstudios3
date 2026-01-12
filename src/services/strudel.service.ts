@@ -2812,11 +2812,78 @@ function renderSampleBuffer(
   leftPan.gain.value = leftGainVal;
   rightPan.gain.value = rightGainVal;
 
-  // Connect: gain -> pan -> destination
-  gainNode.connect(leftPan);
-  gainNode.connect(rightPan);
-  leftPan.connect(destinationL);
-  rightPan.connect(destinationR);
+  // Determine dry/wet mix based on effects
+  const hasDelay = effects.delay && effects.delay > 0;
+  const hasRoom = effects.room && effects.room > 0;
+
+  if (!hasDelay && !hasRoom) {
+    // No effects - direct connection
+    gainNode.connect(leftPan);
+    gainNode.connect(rightPan);
+    leftPan.connect(destinationL);
+    rightPan.connect(destinationR);
+  } else {
+    // Create wet/dry mix
+    const dryGain = offlineCtx.createGain();
+    const wetGain = offlineCtx.createGain();
+
+    // Calculate wet amount (combine delay and room)
+    const delayAmount = effects.delay || 0;
+    const roomAmount = effects.room || 0;
+    const totalWet = Math.min(0.7, delayAmount * 0.5 + roomAmount * 0.5);
+    const dryAmount = 1 - totalWet * 0.5; // Keep dry signal prominent
+
+    dryGain.gain.value = dryAmount;
+    wetGain.gain.value = totalWet;
+
+    // Dry path
+    gainNode.connect(dryGain);
+    dryGain.connect(leftPan);
+    dryGain.connect(rightPan);
+
+    // Wet path with delay/reverb
+    if (hasDelay) {
+      // Simple delay effect
+      const delayNode = offlineCtx.createDelay(1.0);
+      delayNode.delayTime.value = 0.25; // 250ms delay
+
+      const feedbackGain = offlineCtx.createGain();
+      feedbackGain.gain.value = delayAmount * 0.4; // Feedback based on delay amount
+
+      gainNode.connect(delayNode);
+      delayNode.connect(feedbackGain);
+      feedbackGain.connect(delayNode); // Feedback loop
+      delayNode.connect(wetGain);
+    }
+
+    if (hasRoom) {
+      // Simple reverb using multiple delay lines
+      const reverbDelays = [0.029, 0.037, 0.041, 0.053]; // Prime-ish delays for diffusion
+      const reverbGains = [0.25, 0.25, 0.25, 0.25];
+
+      for (let i = 0; i < reverbDelays.length; i++) {
+        const reverbDelay = offlineCtx.createDelay(0.1);
+        reverbDelay.delayTime.value = reverbDelays[i] ?? 0.03;
+        const reverbDelayGain = offlineCtx.createGain();
+        reverbDelayGain.gain.value = (reverbGains[i] ?? 0.25) * roomAmount;
+
+        gainNode.connect(reverbDelay);
+        reverbDelay.connect(reverbDelayGain);
+        reverbDelayGain.connect(wetGain);
+      }
+    }
+
+    // If neither delay nor room added wet signal, connect dry directly
+    if (!hasDelay && !hasRoom) {
+      gainNode.connect(wetGain);
+    }
+
+    wetGain.connect(leftPan);
+    wetGain.connect(rightPan);
+
+    leftPan.connect(destinationL);
+    rightPan.connect(destinationR);
+  }
 
   // Start playback
   source.start(startTime);
