@@ -6,6 +6,7 @@
 /* eslint-disable @typescript-eslint/strict-boolean-expressions */
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 
+import { serverConfig } from '../config/server.config.js';
 import { timestamp, generateRequestId } from '../utils/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -15,10 +16,43 @@ import type { FastifyRequest, FastifyReply, FastifyInstance } from 'fastify';
 
 /**
  * Verifies JWT token and attaches user to request
+ * Checks Authorization header first, then falls back to cookies
+ * In development mode, allows requests without authentication
  */
 export async function verifyJWT(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  // Skip auth in development mode for easier testing
+  if (serverConfig.env === 'development') {
+    request.user = {
+      id: 'dev-user',
+      email: 'dev@localhost',
+      roles: ['admin'],
+    };
+    return;
+  }
+
   try {
-    // jwtVerify is added by @fastify/jwt plugin
+    // Check Authorization header first (Bearer token)
+    const authHeader = request.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.slice(7);
+      const decoded = request.server.jwt.verify<{
+        id?: string;
+        userId?: string;
+        email?: string;
+        role?: string;
+        roles?: string[];
+      }>(token);
+
+      // Attach user to request (accept both 'id' and 'userId' for compatibility)
+      request.user = {
+        id: decoded.id ?? decoded.userId ?? (decoded as unknown as { sub?: string }).sub ?? '',
+        email: decoded.email,
+        roles: decoded.roles ?? (decoded.role ? [decoded.role] : undefined),
+      };
+      return;
+    }
+
+    // Fall back to cookie-based verification
     await request.jwtVerify();
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

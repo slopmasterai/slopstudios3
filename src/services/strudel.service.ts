@@ -20,6 +20,15 @@ import * as acorn from 'acorn';
 
 // Web Audio API types for Node.js
 type OscillatorType = 'sine' | 'square' | 'sawtooth' | 'triangle';
+type BiquadFilterType =
+  | 'lowpass'
+  | 'highpass'
+  | 'bandpass'
+  | 'lowshelf'
+  | 'highshelf'
+  | 'peaking'
+  | 'notch'
+  | 'allpass';
 
 // Lazy-loaded modules for ESM compatibility with Jest
 let NodeOfflineAudioContext: any = null;
@@ -45,8 +54,13 @@ async function loadStrudelModules(): Promise<boolean> {
 
     strudelCore = await import('@strudel/core');
 
-    // Import mini notation support (side effect only)
-    await import('@strudel/mini');
+    // Import mini notation support
+    const miniModule = await import('@strudel/mini');
+
+    // Register all Strudel functions on globalThis for evaluate() to find them
+    // This is required because evaluate() transpiles code that references these functions
+    Object.assign(globalThis, strudelCore);
+    Object.assign(globalThis, miniModule);
 
     return true;
   } catch (error) {
@@ -59,6 +73,7 @@ import { generateRequestId } from '../utils/index.js';
 import { logger } from '../utils/logger.js';
 
 import { getRedisClient, isRedisConnected } from './redis.service.js';
+import { getSampleBuffer, hasSample, initSampleCache } from './sample-cache.service.js';
 import { recordStrudelMetrics } from './strudel-metrics.service.js';
 
 import type {
@@ -174,6 +189,10 @@ export async function initializeStrudelService(
     transpilerAvailable = false;
     logger.warn({ error }, 'Strudel transpiler not available');
   }
+
+  // Initialize sample cache for real sample playback
+  await initSampleCache();
+  logger.info('Sample cache initialized');
 
   // Start queue worker if enabled
   if (serviceConfig.enableQueue) {
@@ -462,13 +481,19 @@ async function validateStrudelSyntax(code: string): Promise<{
     evaluatedPattern = await evaluate(code);
 
     // Check if the result is a valid Pattern
-    if (!evaluatedPattern?._Pattern) {
+    // Strudel patterns have a 'pattern' property (not '_Pattern')
+    const isValidPattern =
+      evaluatedPattern?.pattern !== undefined || evaluatedPattern?._Pattern !== undefined;
+
+    if (!isValidPattern) {
       // It might be a function that needs to be called
       if (typeof evaluatedPattern === 'function') {
         evaluatedPattern = evaluatedPattern();
       }
 
-      if (!evaluatedPattern?._Pattern) {
+      const isValidAfterCall =
+        evaluatedPattern?.pattern !== undefined || evaluatedPattern?._Pattern !== undefined;
+      if (!isValidAfterCall) {
         errors.push({
           message: 'Code did not evaluate to a valid Strudel pattern',
           code: 'NOT_A_PATTERN',
@@ -893,7 +918,10 @@ async function renderStrudelPattern(
         evaluatedPattern = evaluatedPattern();
       }
 
-      if (!evaluatedPattern?._Pattern) {
+      // Check for valid pattern - Strudel patterns have either .pattern or ._Pattern property
+      const isValidPattern =
+        evaluatedPattern?.pattern !== undefined || evaluatedPattern?._Pattern !== undefined;
+      if (!isValidPattern) {
         throw new Error('Code did not evaluate to a valid Strudel pattern');
       }
     } catch (evalError) {
@@ -1334,6 +1362,1611 @@ function renderSynthNote(
 }
 
 /**
+ * Sound synthesis parameters for different sound types
+ */
+interface SoundParams {
+  freq: number;
+  freqDecay: number;
+  freqEnd?: number;
+  noise: boolean;
+  noiseGain: number;
+  noiseFilterFreq?: number;
+  duration: number;
+  waveform: OscillatorType;
+  attack?: number;
+  decay?: number;
+  sustain?: number;
+  release?: number;
+  detune?: number;
+  filterFreq?: number;
+  filterQ?: number;
+  filterType?: BiquadFilterType;
+  harmonics?: number[];
+}
+
+/**
+ * Comprehensive sound library covering Strudel/Dirt-Samples sounds
+ */
+const soundLibrary: Record<string, SoundParams> = {
+  // ============ STANDARD DRUMS ============
+  // Bass drums
+  bd: { freq: 150, freqDecay: 0.05, noise: false, noiseGain: 0, duration: 0.3, waveform: 'sine' },
+  kick: { freq: 150, freqDecay: 0.05, noise: false, noiseGain: 0, duration: 0.3, waveform: 'sine' },
+  clubkick: {
+    freq: 55,
+    freqDecay: 0.08,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.5,
+    waveform: 'sine',
+  },
+  hardkick: {
+    freq: 180,
+    freqDecay: 0.03,
+    noise: true,
+    noiseGain: 0.15,
+    duration: 0.25,
+    waveform: 'sine',
+  },
+  popkick: {
+    freq: 100,
+    freqDecay: 0.04,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.2,
+    waveform: 'sine',
+  },
+  kicklinn: {
+    freq: 120,
+    freqDecay: 0.06,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.35,
+    waveform: 'sine',
+  },
+
+  // Snare drums
+  sd: {
+    freq: 200,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.5,
+    duration: 0.2,
+    waveform: 'triangle',
+  },
+  sn: {
+    freq: 200,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.5,
+    duration: 0.2,
+    waveform: 'triangle',
+  },
+  snare: {
+    freq: 200,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.5,
+    duration: 0.2,
+    waveform: 'triangle',
+  },
+
+  // Hi-hats
+  hh: {
+    freq: 8000,
+    freqDecay: 0.001,
+    noise: true,
+    noiseGain: 0.85,
+    duration: 0.08,
+    waveform: 'square',
+    noiseFilterFreq: 7000,
+  },
+  hihat: {
+    freq: 8000,
+    freqDecay: 0.001,
+    noise: true,
+    noiseGain: 0.85,
+    duration: 0.08,
+    waveform: 'square',
+    noiseFilterFreq: 7000,
+  },
+  hh27: {
+    freq: 9000,
+    freqDecay: 0.001,
+    noise: true,
+    noiseGain: 0.9,
+    duration: 0.06,
+    waveform: 'square',
+    noiseFilterFreq: 8000,
+  },
+  oh: {
+    freq: 8000,
+    freqDecay: 0.001,
+    noise: true,
+    noiseGain: 0.85,
+    duration: 0.35,
+    waveform: 'square',
+    noiseFilterFreq: 6000,
+  },
+  linnhats: {
+    freq: 10000,
+    freqDecay: 0.001,
+    noise: true,
+    noiseGain: 0.9,
+    duration: 0.1,
+    waveform: 'square',
+    noiseFilterFreq: 9000,
+  },
+
+  // Hand claps
+  cp: {
+    freq: 1200,
+    freqDecay: 0.008,
+    noise: true,
+    noiseGain: 0.92,
+    duration: 0.12,
+    waveform: 'square',
+    noiseFilterFreq: 1500,
+  },
+  clap: {
+    freq: 1200,
+    freqDecay: 0.008,
+    noise: true,
+    noiseGain: 0.92,
+    duration: 0.12,
+    waveform: 'square',
+    noiseFilterFreq: 1500,
+  },
+  realclaps: {
+    freq: 1000,
+    freqDecay: 0.01,
+    noise: true,
+    noiseGain: 0.95,
+    duration: 0.15,
+    waveform: 'square',
+    noiseFilterFreq: 1200,
+  },
+
+  // Toms
+  lt: { freq: 80, freqDecay: 0.1, noise: false, noiseGain: 0, duration: 0.3, waveform: 'sine' },
+  mt: { freq: 120, freqDecay: 0.08, noise: false, noiseGain: 0, duration: 0.25, waveform: 'sine' },
+  ht: { freq: 180, freqDecay: 0.06, noise: false, noiseGain: 0, duration: 0.2, waveform: 'sine' },
+  tom: { freq: 120, freqDecay: 0.08, noise: false, noiseGain: 0, duration: 0.25, waveform: 'sine' },
+
+  // Cymbals
+  rd: {
+    freq: 5000,
+    freqDecay: 0.002,
+    noise: true,
+    noiseGain: 0.75,
+    duration: 0.6,
+    waveform: 'triangle',
+    noiseFilterFreq: 4000,
+  },
+  ride: {
+    freq: 5000,
+    freqDecay: 0.002,
+    noise: true,
+    noiseGain: 0.75,
+    duration: 0.6,
+    waveform: 'triangle',
+    noiseFilterFreq: 4000,
+  },
+  cr: {
+    freq: 4000,
+    freqDecay: 0.003,
+    noise: true,
+    noiseGain: 0.85,
+    duration: 1.0,
+    waveform: 'triangle',
+    noiseFilterFreq: 3500,
+  },
+  crash: {
+    freq: 4000,
+    freqDecay: 0.003,
+    noise: true,
+    noiseGain: 0.85,
+    duration: 1.0,
+    waveform: 'triangle',
+    noiseFilterFreq: 3500,
+  },
+
+  // Rim and sidestick
+  rim: {
+    freq: 900,
+    freqDecay: 0.003,
+    noise: true,
+    noiseGain: 0.35,
+    duration: 0.04,
+    waveform: 'square',
+  },
+  rs: {
+    freq: 900,
+    freqDecay: 0.003,
+    noise: true,
+    noiseGain: 0.35,
+    duration: 0.04,
+    waveform: 'square',
+  },
+
+  // Cowbell
+  cb: {
+    freq: 560,
+    freqDecay: 0.015,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.2,
+    waveform: 'square',
+  },
+  cowbell: {
+    freq: 560,
+    freqDecay: 0.015,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.2,
+    waveform: 'square',
+  },
+
+  // ============ 808 DRUM MACHINE ============
+  '808': { freq: 60, freqDecay: 0.15, noise: false, noiseGain: 0, duration: 0.6, waveform: 'sine' },
+  '808bd': {
+    freq: 55,
+    freqDecay: 0.12,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.5,
+    waveform: 'sine',
+  },
+  '808sd': {
+    freq: 180,
+    freqDecay: 0.025,
+    noise: true,
+    noiseGain: 0.6,
+    duration: 0.18,
+    waveform: 'triangle',
+  },
+  '808hc': {
+    freq: 9500,
+    freqDecay: 0.001,
+    noise: true,
+    noiseGain: 0.9,
+    duration: 0.05,
+    waveform: 'square',
+    noiseFilterFreq: 9000,
+  },
+  '808oh': {
+    freq: 8500,
+    freqDecay: 0.001,
+    noise: true,
+    noiseGain: 0.88,
+    duration: 0.4,
+    waveform: 'square',
+    noiseFilterFreq: 7500,
+  },
+  '808cy': {
+    freq: 4500,
+    freqDecay: 0.004,
+    noise: true,
+    noiseGain: 0.82,
+    duration: 1.2,
+    waveform: 'triangle',
+    noiseFilterFreq: 4000,
+  },
+  '808lt': {
+    freq: 70,
+    freqDecay: 0.12,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.35,
+    waveform: 'sine',
+  },
+  '808mt': {
+    freq: 100,
+    freqDecay: 0.1,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.3,
+    waveform: 'sine',
+  },
+  '808ht': {
+    freq: 150,
+    freqDecay: 0.08,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.25,
+    waveform: 'sine',
+  },
+  '808lc': {
+    freq: 200,
+    freqDecay: 0.005,
+    noise: true,
+    noiseGain: 0.4,
+    duration: 0.08,
+    waveform: 'triangle',
+  },
+  '808mc': {
+    freq: 280,
+    freqDecay: 0.005,
+    noise: true,
+    noiseGain: 0.4,
+    duration: 0.07,
+    waveform: 'triangle',
+  },
+
+  // ============ 909 DRUM MACHINE ============
+  '909': {
+    freq: 70,
+    freqDecay: 0.08,
+    noise: true,
+    noiseGain: 0.1,
+    duration: 0.4,
+    waveform: 'sine',
+  },
+
+  // ============ OTHER DRUM MACHINES ============
+  electro1: {
+    freq: 60,
+    freqDecay: 0.1,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.4,
+    waveform: 'sine',
+  },
+  drumtraks: {
+    freq: 80,
+    freqDecay: 0.07,
+    noise: true,
+    noiseGain: 0.2,
+    duration: 0.25,
+    waveform: 'sine',
+  },
+  dr55: {
+    freq: 90,
+    freqDecay: 0.06,
+    noise: true,
+    noiseGain: 0.15,
+    duration: 0.2,
+    waveform: 'sine',
+  },
+  dr: { freq: 100, freqDecay: 0.05, noise: true, noiseGain: 0.2, duration: 0.2, waveform: 'sine' },
+  dr2: {
+    freq: 110,
+    freqDecay: 0.05,
+    noise: true,
+    noiseGain: 0.25,
+    duration: 0.22,
+    waveform: 'sine',
+  },
+  drum: {
+    freq: 120,
+    freqDecay: 0.05,
+    noise: true,
+    noiseGain: 0.2,
+    duration: 0.2,
+    waveform: 'sine',
+  },
+  gretsch: {
+    freq: 130,
+    freqDecay: 0.06,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.25,
+    waveform: 'sine',
+  },
+
+  // ============ PERCUSSION ============
+  perc: {
+    freq: 500,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.4,
+    duration: 0.1,
+    waveform: 'triangle',
+  },
+  click: {
+    freq: 1500,
+    freqDecay: 0.001,
+    noise: true,
+    noiseGain: 0.5,
+    duration: 0.02,
+    waveform: 'square',
+  },
+  clak: {
+    freq: 2000,
+    freqDecay: 0.001,
+    noise: true,
+    noiseGain: 0.6,
+    duration: 0.03,
+    waveform: 'square',
+  },
+  tink: {
+    freq: 3000,
+    freqDecay: 0.005,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.08,
+    waveform: 'sine',
+  },
+  tok: {
+    freq: 800,
+    freqDecay: 0.003,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.05,
+    waveform: 'square',
+  },
+  can: {
+    freq: 600,
+    freqDecay: 0.01,
+    noise: true,
+    noiseGain: 0.5,
+    duration: 0.15,
+    waveform: 'triangle',
+  },
+  bottle: {
+    freq: 800,
+    freqDecay: 0.02,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.3,
+    waveform: 'sine',
+  },
+  metal: {
+    freq: 2500,
+    freqDecay: 0.005,
+    noise: true,
+    noiseGain: 0.7,
+    duration: 0.4,
+    waveform: 'square',
+  },
+  coins: {
+    freq: 4000,
+    freqDecay: 0.003,
+    noise: true,
+    noiseGain: 0.6,
+    duration: 0.08,
+    waveform: 'triangle',
+  },
+  glasstap: {
+    freq: 2000,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.15,
+    waveform: 'sine',
+  },
+  lighter: {
+    freq: 3500,
+    freqDecay: 0.002,
+    noise: true,
+    noiseGain: 0.4,
+    duration: 0.05,
+    waveform: 'square',
+  },
+  stomp: {
+    freq: 80,
+    freqDecay: 0.08,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.2,
+    waveform: 'sine',
+  },
+  hand: {
+    freq: 500,
+    freqDecay: 0.01,
+    noise: true,
+    noiseGain: 0.7,
+    duration: 0.08,
+    waveform: 'triangle',
+  },
+
+  // Shakers and tambourine
+  sh: {
+    freq: 7000,
+    freqDecay: 0.001,
+    noise: true,
+    noiseGain: 0.95,
+    duration: 0.1,
+    waveform: 'square',
+    noiseFilterFreq: 6000,
+  },
+  tb: {
+    freq: 5000,
+    freqDecay: 0.002,
+    noise: true,
+    noiseGain: 0.85,
+    duration: 0.15,
+    waveform: 'square',
+    noiseFilterFreq: 4500,
+  },
+
+  // ============ BASS SOUNDS ============
+  bass: {
+    freq: 80,
+    freqDecay: 0.3,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.5,
+    waveform: 'sawtooth',
+    attack: 0.01,
+    decay: 0.1,
+    sustain: 0.7,
+    release: 0.15,
+  },
+  bass0: {
+    freq: 60,
+    freqDecay: 0.4,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.6,
+    waveform: 'sine',
+    attack: 0.005,
+    decay: 0.15,
+    sustain: 0.8,
+    release: 0.2,
+  },
+  bass1: {
+    freq: 70,
+    freqDecay: 0.35,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.55,
+    waveform: 'sawtooth',
+    attack: 0.01,
+    decay: 0.12,
+    sustain: 0.75,
+    release: 0.18,
+  },
+  bass2: {
+    freq: 75,
+    freqDecay: 0.32,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.52,
+    waveform: 'square',
+    attack: 0.008,
+    decay: 0.1,
+    sustain: 0.7,
+    release: 0.15,
+  },
+  bass3: {
+    freq: 65,
+    freqDecay: 0.38,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.58,
+    waveform: 'triangle',
+    attack: 0.01,
+    decay: 0.14,
+    sustain: 0.78,
+    release: 0.2,
+  },
+  bassdm: { freq: 55, freqDecay: 0.1, noise: false, noiseGain: 0, duration: 0.4, waveform: 'sine' },
+  bassfoo: {
+    freq: 50,
+    freqDecay: 0.15,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.5,
+    waveform: 'sine',
+  },
+  jungbass: {
+    freq: 45,
+    freqDecay: 0.2,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.6,
+    waveform: 'sine',
+  },
+  jvbass: {
+    freq: 55,
+    freqDecay: 0.18,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.55,
+    waveform: 'sawtooth',
+    filterFreq: 800,
+    filterQ: 2,
+  },
+  subroc3d: {
+    freq: 40,
+    freqDecay: 0.25,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.7,
+    waveform: 'sine',
+  },
+
+  // ============ SYNTH SOUNDS ============
+  // Plucks
+  pluck: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.4,
+    waveform: 'triangle',
+    attack: 0.001,
+    decay: 0.1,
+    sustain: 0.3,
+    release: 0.2,
+  },
+  arpy: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.25,
+    waveform: 'sawtooth',
+    attack: 0.001,
+    decay: 0.08,
+    sustain: 0.2,
+    release: 0.15,
+  },
+  arp: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.2,
+    waveform: 'square',
+    attack: 0.001,
+    decay: 0.06,
+    sustain: 0.25,
+    release: 0.1,
+  },
+
+  // Bleeps and blips
+  bleep: {
+    freq: 880,
+    freqDecay: 0.02,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.15,
+    waveform: 'sine',
+    attack: 0.001,
+    decay: 0.05,
+    sustain: 0.5,
+    release: 0.08,
+  },
+  blip: {
+    freq: 660,
+    freqDecay: 0.015,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.1,
+    waveform: 'sine',
+    attack: 0.001,
+    decay: 0.03,
+    sustain: 0.4,
+    release: 0.05,
+  },
+
+  // Pads
+  pad: {
+    freq: 220,
+    freqDecay: 0.5,
+    noise: false,
+    noiseGain: 0,
+    duration: 2.0,
+    waveform: 'sawtooth',
+    attack: 0.3,
+    decay: 0.2,
+    sustain: 0.8,
+    release: 0.5,
+    filterFreq: 2000,
+    filterQ: 1,
+  },
+  padlong: {
+    freq: 220,
+    freqDecay: 0.5,
+    noise: false,
+    noiseGain: 0,
+    duration: 4.0,
+    waveform: 'sawtooth',
+    attack: 0.5,
+    decay: 0.3,
+    sustain: 0.85,
+    release: 0.8,
+    filterFreq: 1500,
+    filterQ: 1,
+  },
+
+  // Stabs
+  stab: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.15,
+    waveform: 'sawtooth',
+    attack: 0.001,
+    decay: 0.05,
+    sustain: 0.3,
+    release: 0.08,
+  },
+
+  // FM-style sounds
+  fm: {
+    freq: 440,
+    freqDecay: 0.02,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.3,
+    waveform: 'sine',
+    attack: 0.001,
+    decay: 0.1,
+    sustain: 0.4,
+    release: 0.15,
+  },
+
+  // Classic synths
+  moog: {
+    freq: 220,
+    freqDecay: 0.1,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.5,
+    waveform: 'sawtooth',
+    attack: 0.01,
+    decay: 0.15,
+    sustain: 0.6,
+    release: 0.2,
+    filterFreq: 1000,
+    filterQ: 3,
+  },
+  juno: {
+    freq: 220,
+    freqDecay: 0.1,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.5,
+    waveform: 'sawtooth',
+    attack: 0.02,
+    decay: 0.12,
+    sustain: 0.65,
+    release: 0.18,
+    filterFreq: 1200,
+    filterQ: 2,
+  },
+  hoover: {
+    freq: 150,
+    freqDecay: 0.15,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.6,
+    waveform: 'sawtooth',
+    attack: 0.01,
+    decay: 0.2,
+    sustain: 0.5,
+    release: 0.25,
+    detune: 15,
+  },
+
+  // Notes/keys
+  notes: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.5,
+    waveform: 'triangle',
+    attack: 0.01,
+    decay: 0.1,
+    sustain: 0.6,
+    release: 0.2,
+  },
+  newnotes: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.4,
+    waveform: 'sine',
+    attack: 0.005,
+    decay: 0.08,
+    sustain: 0.55,
+    release: 0.15,
+  },
+  feel: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.6,
+    waveform: 'sine',
+    attack: 0.02,
+    decay: 0.15,
+    sustain: 0.7,
+    release: 0.25,
+  },
+  casio: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.35,
+    waveform: 'square',
+    attack: 0.001,
+    decay: 0.05,
+    sustain: 0.4,
+    release: 0.1,
+  },
+
+  // ============ INSTRUMENTS ============
+  // Piano-like
+  piano: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 1.0,
+    waveform: 'triangle',
+    attack: 0.001,
+    decay: 0.3,
+    sustain: 0.4,
+    release: 0.3,
+  },
+
+  // Guitar-like
+  gtr: {
+    freq: 220,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.8,
+    waveform: 'sawtooth',
+    attack: 0.001,
+    decay: 0.2,
+    sustain: 0.3,
+    release: 0.25,
+  },
+
+  // Sitar
+  sitar: {
+    freq: 220,
+    freqDecay: 0.02,
+    noise: false,
+    noiseGain: 0,
+    duration: 1.2,
+    waveform: 'sawtooth',
+    attack: 0.001,
+    decay: 0.3,
+    sustain: 0.2,
+    release: 0.4,
+  },
+
+  // Brass
+  trump: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.6,
+    waveform: 'sawtooth',
+    attack: 0.02,
+    decay: 0.1,
+    sustain: 0.7,
+    release: 0.15,
+  },
+
+  // Sax
+  sax: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: true,
+    noiseGain: 0.08,
+    duration: 0.6,
+    waveform: 'sawtooth',
+    attack: 0.03,
+    decay: 0.1,
+    sustain: 0.65,
+    release: 0.2,
+  },
+
+  // ============ TABLA / WORLD ============
+  tabla: {
+    freq: 200,
+    freqDecay: 0.03,
+    noise: true,
+    noiseGain: 0.25,
+    duration: 0.2,
+    waveform: 'sine',
+  },
+  tabla2: {
+    freq: 150,
+    freqDecay: 0.04,
+    noise: true,
+    noiseGain: 0.2,
+    duration: 0.25,
+    waveform: 'sine',
+  },
+  tablex: {
+    freq: 180,
+    freqDecay: 0.035,
+    noise: true,
+    noiseGain: 0.22,
+    duration: 0.22,
+    waveform: 'sine',
+  },
+  world: {
+    freq: 300,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.2,
+    waveform: 'triangle',
+  },
+  east: { freq: 350, freqDecay: 0.02, noise: false, noiseGain: 0, duration: 0.3, waveform: 'sine' },
+
+  // ============ EFFECTS / NOISE ============
+  noise: {
+    freq: 1000,
+    freqDecay: 0.01,
+    noise: true,
+    noiseGain: 0.98,
+    duration: 0.3,
+    waveform: 'sine',
+  },
+  noise2: {
+    freq: 2000,
+    freqDecay: 0.01,
+    noise: true,
+    noiseGain: 0.95,
+    duration: 0.25,
+    waveform: 'sine',
+  },
+  glitch: {
+    freq: 3000,
+    freqDecay: 0.002,
+    noise: true,
+    noiseGain: 0.9,
+    duration: 0.08,
+    waveform: 'square',
+  },
+  glitch2: {
+    freq: 4000,
+    freqDecay: 0.003,
+    noise: true,
+    noiseGain: 0.85,
+    duration: 0.1,
+    waveform: 'square',
+  },
+  wind: {
+    freq: 400,
+    freqDecay: 0.1,
+    noise: true,
+    noiseGain: 0.95,
+    duration: 1.0,
+    waveform: 'sine',
+    noiseFilterFreq: 800,
+  },
+  breath: {
+    freq: 500,
+    freqDecay: 0.05,
+    noise: true,
+    noiseGain: 0.9,
+    duration: 0.5,
+    waveform: 'sine',
+    noiseFilterFreq: 1000,
+  },
+  bubble: {
+    freq: 600,
+    freqDecay: 0.05,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.2,
+    waveform: 'sine',
+  },
+  fire: {
+    freq: 800,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.85,
+    duration: 0.4,
+    waveform: 'triangle',
+    noiseFilterFreq: 2000,
+  },
+
+  // FX sounds
+  fx: {
+    freq: 1000,
+    freqDecay: 0.05,
+    noise: true,
+    noiseGain: 0.5,
+    duration: 0.3,
+    waveform: 'sawtooth',
+  },
+  feelfx: {
+    freq: 800,
+    freqDecay: 0.04,
+    noise: true,
+    noiseGain: 0.4,
+    duration: 0.25,
+    waveform: 'triangle',
+  },
+
+  // ============ RAVE / TECHNO ============
+  rave: {
+    freq: 150,
+    freqDecay: 0.05,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.3,
+    waveform: 'sawtooth',
+    attack: 0.001,
+    decay: 0.08,
+    sustain: 0.4,
+    release: 0.1,
+  },
+  rave2: {
+    freq: 180,
+    freqDecay: 0.04,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.25,
+    waveform: 'square',
+    attack: 0.001,
+    decay: 0.06,
+    sustain: 0.35,
+    release: 0.08,
+  },
+  ravemono: {
+    freq: 140,
+    freqDecay: 0.06,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.35,
+    waveform: 'sawtooth',
+    attack: 0.001,
+    decay: 0.1,
+    sustain: 0.45,
+    release: 0.12,
+  },
+  techno: {
+    freq: 100,
+    freqDecay: 0.08,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.4,
+    waveform: 'sawtooth',
+  },
+  gabba: {
+    freq: 200,
+    freqDecay: 0.03,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.2,
+    waveform: 'sine',
+  },
+  gabbaloud: {
+    freq: 220,
+    freqDecay: 0.025,
+    noise: true,
+    noiseGain: 0.35,
+    duration: 0.18,
+    waveform: 'sine',
+  },
+  gabbalouder: {
+    freq: 240,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.4,
+    duration: 0.16,
+    waveform: 'sine',
+  },
+  hardcore: {
+    freq: 180,
+    freqDecay: 0.04,
+    noise: true,
+    noiseGain: 0.25,
+    duration: 0.22,
+    waveform: 'sine',
+  },
+  industrial: {
+    freq: 300,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.6,
+    duration: 0.15,
+    waveform: 'square',
+  },
+
+  // ============ JUNGLE / BREAKS ============
+  jungle: {
+    freq: 140,
+    freqDecay: 0.06,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.25,
+    waveform: 'sine',
+  },
+  breaks125: {
+    freq: 150,
+    freqDecay: 0.05,
+    noise: true,
+    noiseGain: 0.35,
+    duration: 0.2,
+    waveform: 'triangle',
+  },
+  breaks152: {
+    freq: 160,
+    freqDecay: 0.045,
+    noise: true,
+    noiseGain: 0.32,
+    duration: 0.18,
+    waveform: 'triangle',
+  },
+  breaks157: {
+    freq: 165,
+    freqDecay: 0.04,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.17,
+    waveform: 'triangle',
+  },
+  breaks165: {
+    freq: 170,
+    freqDecay: 0.038,
+    noise: true,
+    noiseGain: 0.28,
+    duration: 0.16,
+    waveform: 'triangle',
+  },
+  amencutup: {
+    freq: 155,
+    freqDecay: 0.05,
+    noise: true,
+    noiseGain: 0.4,
+    duration: 0.2,
+    waveform: 'triangle',
+  },
+
+  // ============ HOUSE / JAZZ ============
+  house: {
+    freq: 120,
+    freqDecay: 0.07,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.35,
+    waveform: 'sine',
+  },
+  jazz: {
+    freq: 100,
+    freqDecay: 0.08,
+    noise: true,
+    noiseGain: 0.15,
+    duration: 0.3,
+    waveform: 'sine',
+  },
+
+  // ============ MISC SOUNDS ============
+  sid: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.3,
+    waveform: 'square',
+    attack: 0.001,
+    decay: 0.05,
+    sustain: 0.5,
+    release: 0.1,
+  },
+  simplesine: {
+    freq: 440,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.5,
+    waveform: 'sine',
+    attack: 0.01,
+    decay: 0.1,
+    sustain: 0.7,
+    release: 0.2,
+  },
+  chin: {
+    freq: 1200,
+    freqDecay: 0.01,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.2,
+    waveform: 'triangle',
+  },
+  circus: {
+    freq: 600,
+    freqDecay: 0.03,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.3,
+    waveform: 'sine',
+  },
+  cosmicg: {
+    freq: 200,
+    freqDecay: 0.1,
+    noise: true,
+    noiseGain: 0.2,
+    duration: 0.5,
+    waveform: 'sawtooth',
+  },
+  future: {
+    freq: 300,
+    freqDecay: 0.05,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.4,
+    waveform: 'sawtooth',
+  },
+  hit: {
+    freq: 400,
+    freqDecay: 0.01,
+    noise: true,
+    noiseGain: 0.5,
+    duration: 0.15,
+    waveform: 'triangle',
+  },
+  invaders: {
+    freq: 800,
+    freqDecay: 0.02,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.2,
+    waveform: 'square',
+  },
+  space: {
+    freq: 200,
+    freqDecay: 0.1,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.8,
+    waveform: 'sine',
+  },
+  wobble: {
+    freq: 100,
+    freqDecay: 0.2,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.6,
+    waveform: 'sawtooth',
+    filterFreq: 500,
+    filterQ: 5,
+  },
+  sugar: {
+    freq: 500,
+    freqDecay: 0.02,
+    noise: false,
+    noiseGain: 0,
+    duration: 0.25,
+    waveform: 'sine',
+  },
+  yeah: {
+    freq: 400,
+    freqDecay: 0.03,
+    noise: true,
+    noiseGain: 0.2,
+    duration: 0.3,
+    waveform: 'sawtooth',
+  },
+  miniyeah: {
+    freq: 500,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.15,
+    duration: 0.2,
+    waveform: 'sawtooth',
+  },
+
+  // Misc percussion
+  misc: {
+    freq: 600,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.4,
+    duration: 0.15,
+    waveform: 'triangle',
+  },
+  crow: {
+    freq: 800,
+    freqDecay: 0.05,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.4,
+    waveform: 'sawtooth',
+  },
+  birds: {
+    freq: 2000,
+    freqDecay: 0.03,
+    noise: true,
+    noiseGain: 0.2,
+    duration: 0.3,
+    waveform: 'sine',
+  },
+  birds3: {
+    freq: 2500,
+    freqDecay: 0.025,
+    noise: true,
+    noiseGain: 0.15,
+    duration: 0.25,
+    waveform: 'sine',
+  },
+  insect: {
+    freq: 4000,
+    freqDecay: 0.01,
+    noise: true,
+    noiseGain: 0.5,
+    duration: 0.15,
+    waveform: 'square',
+  },
+
+  // Mouth/speech placeholder (just a tone)
+  mouth: {
+    freq: 300,
+    freqDecay: 0.05,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.2,
+    waveform: 'sawtooth',
+  },
+  speech: {
+    freq: 250,
+    freqDecay: 0.04,
+    noise: true,
+    noiseGain: 0.25,
+    duration: 0.3,
+    waveform: 'sawtooth',
+  },
+  speechless: {
+    freq: 200,
+    freqDecay: 0.05,
+    noise: true,
+    noiseGain: 0.35,
+    duration: 0.35,
+    waveform: 'triangle',
+  },
+  diphone: {
+    freq: 280,
+    freqDecay: 0.04,
+    noise: true,
+    noiseGain: 0.2,
+    duration: 0.25,
+    waveform: 'sawtooth',
+  },
+  diphone2: {
+    freq: 320,
+    freqDecay: 0.035,
+    noise: true,
+    noiseGain: 0.18,
+    duration: 0.22,
+    waveform: 'sawtooth',
+  },
+};
+
+/**
+ * Renders a sample buffer to the audio context
+ */
+interface SampleEffects {
+  lpf?: number; // Low pass filter frequency
+  hpf?: number; // High pass filter frequency
+  room?: number; // Reverb amount 0-1
+  delay?: number; // Delay amount 0-1
+}
+
+function renderSampleBuffer(
+  offlineCtx: any,
+  destinationL: any,
+  destinationR: any,
+  sampleData: Float32Array,
+  startTime: number,
+  gain: number,
+  pan: number,
+  playbackRate: number = 1.0,
+  effects: SampleEffects = {}
+): void {
+  // Create an AudioBuffer from the sample data
+  const audioBuffer = offlineCtx.createBuffer(1, sampleData.length, offlineCtx.sampleRate);
+  audioBuffer.copyToChannel(sampleData, 0);
+
+  // Create buffer source
+  const source = offlineCtx.createBufferSource();
+  source.buffer = audioBuffer;
+
+  // Apply pitch shifting via playback rate
+  source.playbackRate.value = playbackRate;
+
+  // Create gain node
+  const gainNode = offlineCtx.createGain();
+  gainNode.gain.value = gain;
+
+  // Build the audio chain: source -> [filters] -> gain -> pan -> destination
+  let lastNode: any = source;
+
+  // Apply low pass filter if specified
+  if (effects.lpf && effects.lpf < 20000) {
+    const lpfNode = offlineCtx.createBiquadFilter();
+    lpfNode.type = 'lowpass';
+    lpfNode.frequency.value = effects.lpf;
+    lpfNode.Q.value = 1;
+    lastNode.connect(lpfNode);
+    lastNode = lpfNode;
+  }
+
+  // Apply high pass filter if specified
+  if (effects.hpf && effects.hpf > 20) {
+    const hpfNode = offlineCtx.createBiquadFilter();
+    hpfNode.type = 'highpass';
+    hpfNode.frequency.value = effects.hpf;
+    hpfNode.Q.value = 1;
+    lastNode.connect(hpfNode);
+    lastNode = hpfNode;
+  }
+
+  // Connect to gain
+  lastNode.connect(gainNode);
+
+  // Apply panning
+  const leftGainVal = Math.cos(((pan + 1) * Math.PI) / 4);
+  const rightGainVal = Math.sin(((pan + 1) * Math.PI) / 4);
+
+  const leftPan = offlineCtx.createGain();
+  const rightPan = offlineCtx.createGain();
+  leftPan.gain.value = leftGainVal;
+  rightPan.gain.value = rightGainVal;
+
+  // Connect: gain -> pan -> destination
+  gainNode.connect(leftPan);
+  gainNode.connect(rightPan);
+  leftPan.connect(destinationL);
+  rightPan.connect(destinationR);
+
+  // Start playback
+  source.start(startTime);
+}
+
+/**
+ * Synthesizes a sound based on sample name using comprehensive sound library
+ */
+async function renderDrumSound(
+  offlineCtx: any,
+  destinationL: any,
+  destinationR: any,
+  sampleName: string,
+  sampleIndex: number,
+  startTime: number,
+  gain: number,
+  pan: number,
+  playbackRate: number = 1.0,
+  effects: SampleEffects = {}
+): Promise<void> {
+  // Try to load real sample first
+  if (hasSample(sampleName)) {
+    try {
+      const sampleBuffer = await getSampleBuffer(sampleName, sampleIndex, offlineCtx);
+      if (sampleBuffer) {
+        // Play the real sample with optional pitch shifting and effects
+        renderSampleBuffer(
+          offlineCtx,
+          destinationL,
+          destinationR,
+          sampleBuffer,
+          startTime,
+          gain,
+          pan,
+          playbackRate,
+          effects
+        );
+        return;
+      } else {
+        logger.warn({ sampleName, sampleIndex }, 'Sample buffer returned null, using fallback');
+      }
+    } catch (error) {
+      logger.warn({ error, sampleName }, 'Failed to load sample, using synthesized fallback');
+    }
+  } else {
+    logger.warn({ sampleName }, 'Sample not in hasSample map, using synth');
+  }
+
+  // Fallback to synthesized sound
+  // Get sound params from library or use default
+  const params = soundLibrary[sampleName.toLowerCase()] || {
+    freq: 400,
+    freqDecay: 0.02,
+    noise: true,
+    noiseGain: 0.3,
+    duration: 0.15,
+    waveform: 'triangle' as OscillatorType,
+  };
+
+  // Create oscillator for tonal component
+  const osc = offlineCtx.createOscillator();
+  const oscGain = offlineCtx.createGain();
+
+  osc.type = params.waveform;
+  osc.frequency.setValueAtTime(params.freq, startTime);
+  osc.frequency.exponentialRampToValueAtTime(
+    Math.max(20, params.freq * 0.1),
+    startTime + params.freqDecay
+  );
+
+  // Quick attack, exponential decay
+  const oscLevel = gain * (1 - params.noiseGain);
+  oscGain.gain.setValueAtTime(oscLevel, startTime);
+  oscGain.gain.exponentialRampToValueAtTime(0.001, startTime + params.duration);
+
+  // Apply panning
+  const leftGainVal = Math.cos(((pan + 1) * Math.PI) / 4);
+  const rightGainVal = Math.sin(((pan + 1) * Math.PI) / 4);
+
+  const leftPan = offlineCtx.createGain();
+  const rightPan = offlineCtx.createGain();
+  leftPan.gain.value = leftGainVal;
+  rightPan.gain.value = rightGainVal;
+
+  osc.connect(oscGain);
+  oscGain.connect(leftPan);
+  oscGain.connect(rightPan);
+  leftPan.connect(destinationL);
+  rightPan.connect(destinationR);
+
+  osc.start(startTime);
+  osc.stop(startTime + params.duration + 0.01);
+
+  // Add noise component for snares, hi-hats, etc.
+  if (params.noise && params.noiseGain > 0) {
+    // Create noise using a buffer
+    const noiseLength = Math.ceil(params.duration * offlineCtx.sampleRate);
+    const noiseBuffer = offlineCtx.createBuffer(1, noiseLength, offlineCtx.sampleRate);
+    const noiseData = noiseBuffer.getChannelData(0);
+
+    for (let i = 0; i < noiseLength; i++) {
+      noiseData[i] = Math.random() * 2 - 1;
+    }
+
+    const noiseSource = offlineCtx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+
+    // High-pass filter for noise (makes it more metallic)
+    const noiseFilter = offlineCtx.createBiquadFilter();
+    noiseFilter.type = 'highpass';
+    noiseFilter.frequency.value = params.freq > 1000 ? 5000 : 1000;
+
+    const noiseGainNode = offlineCtx.createGain();
+    const noiseLevel = gain * params.noiseGain;
+    noiseGainNode.gain.setValueAtTime(noiseLevel, startTime);
+    noiseGainNode.gain.exponentialRampToValueAtTime(0.001, startTime + params.duration);
+
+    const noiseLeftPan = offlineCtx.createGain();
+    const noiseRightPan = offlineCtx.createGain();
+    noiseLeftPan.gain.value = leftGainVal;
+    noiseRightPan.gain.value = rightGainVal;
+
+    noiseSource.connect(noiseFilter);
+    noiseFilter.connect(noiseGainNode);
+    noiseGainNode.connect(noiseLeftPan);
+    noiseGainNode.connect(noiseRightPan);
+    noiseLeftPan.connect(destinationL);
+    noiseRightPan.connect(destinationR);
+
+    noiseSource.start(startTime);
+    noiseSource.stop(startTime + params.duration + 0.01);
+  }
+}
+
+/**
+ * Checks if a hap value represents a sample-based sound
+ */
+function isSampleBasedHap(value: any): string | null {
+  if (typeof value === 'object' && value !== null) {
+    // Check for sample name in 's' or 'sound' property
+    if (typeof value.s === 'string') return value.s;
+    if (typeof value.sound === 'string') return value.sound;
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  return null;
+}
+
+/**
  * Renders a Strudel pattern to audio using the real Strudel engine and OfflineAudioContext
  */
 async function renderPatternToAudio(
@@ -1369,32 +3002,144 @@ async function renderPatternToAudio(
   // Strudel patterns work in cycles, so we need to query based on cycles
   const numCycles = duration * cps;
 
-  // Create TimeSpan for querying (Strudel uses Fraction internally)
-  const { TimeSpan, State } = strudelCore;
-  const querySpan = new TimeSpan(0, numCycles);
-  const state = new State(querySpan);
-
   // Query the pattern to get all haps (events)
+  // Strudel patterns can be queried different ways depending on version
   let haps: StrudelHap[] = [];
   try {
-    haps = pattern.query(state);
+    // Find the actual Pattern object - it might be nested
+    let actualPattern = pattern;
+
+    // Log pattern structure for debugging
+    logger.info(
+      {
+        patternType: typeof pattern,
+        hasQueryArc: typeof pattern?.queryArc === 'function',
+        hasFirstCycle: typeof pattern?.firstCycle === 'function',
+        patternKeys: pattern ? Object.keys(pattern).slice(0, 10) : [],
+        innerPatternType: typeof pattern?.pattern,
+        innerHasQueryArc: typeof pattern?.pattern?.queryArc === 'function',
+        innerHasFirstCycle: typeof pattern?.pattern?.firstCycle === 'function',
+        innerPatternKeys: pattern?.pattern ? Object.keys(pattern.pattern).slice(0, 10) : [],
+      },
+      'Pattern structure'
+    );
+
+    // Navigate to find the actual Pattern with queryArc
+    if (typeof pattern?.queryArc === 'function') {
+      actualPattern = pattern;
+    } else if (typeof pattern?.pattern?.queryArc === 'function') {
+      actualPattern = pattern.pattern;
+    } else if (typeof pattern?.pattern?.pattern?.queryArc === 'function') {
+      actualPattern = pattern.pattern.pattern;
+    }
+
+    // Try to query using queryArc (the standard Strudel method)
+    if (typeof actualPattern?.queryArc === 'function') {
+      haps = actualPattern.queryArc(0, numCycles);
+      logger.info({ method: 'queryArc', hapCount: haps.length }, 'Query method used');
+    } else if (typeof actualPattern?.firstCycle === 'function') {
+      // Fallback - get first cycle and repeat for duration
+      const cycleHaps = actualPattern.firstCycle();
+      logger.info({ method: 'firstCycle', cycleHapCount: cycleHaps?.length }, 'Query method used');
+      haps = [];
+      for (let cycle = 0; cycle < Math.ceil(numCycles); cycle++) {
+        for (const hap of cycleHaps || []) {
+          // Offset hap times by cycle number
+          const wholeBegin = Number(hap.whole.begin.valueOf()) + cycle;
+          const wholeEnd = Number(hap.whole.end.valueOf()) + cycle;
+          const partBegin = Number(hap.part.begin.valueOf()) + cycle;
+          const partEnd = Number(hap.part.end.valueOf()) + cycle;
+          const offsetHap = {
+            ...hap,
+            whole: {
+              begin: { valueOf: (): number => wholeBegin },
+              end: { valueOf: (): number => wholeEnd },
+            },
+            part: {
+              begin: { valueOf: (): number => partBegin },
+              end: { valueOf: (): number => partEnd },
+            },
+            hasOnset: (): boolean => (hap.hasOnset ? Boolean(hap.hasOnset()) : true),
+          };
+          if (offsetHap.whole.begin.valueOf() < numCycles) {
+            haps.push(offsetHap as StrudelHap);
+          }
+        }
+      }
+    } else {
+      // Last resort - try to manually extract events if pattern has an _events property or similar
+      logger.warn(
+        {
+          patternStr: JSON.stringify(actualPattern)?.slice(0, 500),
+          methods: actualPattern
+            ? Object.getOwnPropertyNames(Object.getPrototypeOf(actualPattern) || {}).slice(0, 20)
+            : [],
+        },
+        'No query method found, pattern structure'
+      );
+    }
   } catch (queryError) {
-    logger.warn({ error: queryError }, 'Error querying pattern, using empty haps');
+    const errorMsg = queryError instanceof Error ? queryError.message : String(queryError);
+    logger.warn(
+      {
+        error: errorMsg,
+        stack: queryError instanceof Error ? queryError.stack?.slice(0, 300) : '',
+      },
+      'Error querying pattern'
+    );
   }
 
   logger.info({ hapCount: haps.length, numCycles, duration }, 'Rendering Strudel haps to audio');
 
   // Sort haps by onset time
-  haps.sort((a, b) => a.whole.begin.valueOf() - b.whole.begin.valueOf());
+  haps.sort((a, b) => {
+    const aBegin = a.whole?.begin?.valueOf?.() ?? 0;
+    const bBegin = b.whole?.begin?.valueOf?.() ?? 0;
+    return aBegin - bBegin;
+  });
+
+  // Log haps AFTER sorting for debugging
+  if (haps.length > 0) {
+    const allTimes = haps.map((h) => h.whole?.begin?.valueOf?.() ?? h.whole?.begin);
+    const uniqueTimes = [...new Set(allTimes.map((t) => Math.round(t * 1000) / 1000))].sort(
+      (a, b) => a - b
+    );
+    logger.info(
+      {
+        totalHaps: haps.length,
+        uniqueTimeCount: uniqueTimes.length,
+        first20Times: uniqueTimes.slice(0, 20),
+      },
+      'Hap timing distribution'
+    );
+
+    const sampleHaps = haps.slice(0, 8).map((h, i) => ({
+      index: i,
+      wholeBegin: h.whole?.begin?.valueOf?.() ?? h.whole?.begin,
+      wholeEnd: h.whole?.end?.valueOf?.() ?? h.whole?.end,
+      value: typeof h.value === 'object' ? JSON.stringify(h.value).slice(0, 50) : h.value,
+      hasOnset: typeof h.hasOnset === 'function' ? h.hasOnset() : 'no hasOnset method',
+    }));
+    logger.info({ sampleHaps }, 'First 8 haps after sorting');
+  }
 
   // Track progress
   let processedHaps = 0;
+  let skippedNoOnset = 0;
+  let skippedOutOfWindow = 0;
   const totalHaps = haps.length || 1;
 
+  // Track sample usage
+  const sampleStats: Record<string, { count: number; loaded: boolean }> = {};
+
   // Render each hap as audio
+  const renderedTimes: number[] = [];
   for (const hap of haps) {
     // Only render haps with onsets (to avoid duplicate sounds from continuous patterns)
-    if (!hap.hasOnset()) continue;
+    if (!hap.hasOnset()) {
+      skippedNoOnset++;
+      continue;
+    }
 
     const value = hap.value;
 
@@ -1405,51 +3150,133 @@ async function renderPatternToAudio(
     const hapDuration = (endCycle - startCycle) / cps;
 
     // Skip events outside our render window
-    if (startTime >= duration || startTime < 0) continue;
-
-    // Get synthesis parameters from the hap value
-    const frequency = getFrequencyFromHap(value);
-    const gain = getGainFromHap(value);
-    const pan = getPanFromHap(value);
-
-    // Get waveform type if specified
-    let waveform: OscillatorType = 'sine';
-    if (typeof value === 'object' && value !== null) {
-      if (value.wave) waveform = value.wave as OscillatorType;
-      else if (value.s === 'sine' || value.sound === 'sine') waveform = 'sine';
-      else if (value.s === 'square' || value.sound === 'square') waveform = 'square';
-      else if (value.s === 'sawtooth' || value.sound === 'sawtooth') waveform = 'sawtooth';
-      else if (value.s === 'triangle' || value.sound === 'triangle') waveform = 'triangle';
+    if (startTime >= duration || startTime < 0) {
+      skippedOutOfWindow++;
+      continue;
     }
 
-    // Get ADSR if specified
-    const attack = typeof value?.attack === 'number' ? value.attack : 0.01;
-    const decay = typeof value?.decay === 'number' ? value.decay : 0.1;
-    const sustain = typeof value?.sustain === 'number' ? value.sustain : 0.7;
-    const release = typeof value?.release === 'number' ? value.release : 0.1;
+    // Track rendered times for debugging
+    renderedTimes.push(Math.round(startTime * 1000) / 1000);
 
-    // Render the note
-    renderSynthNote(
-      offlineCtx,
-      leftGain,
-      rightGain,
-      frequency,
-      Math.max(0, startTime),
-      Math.min(hapDuration, duration - startTime),
-      gain,
-      pan,
-      waveform,
-      attack,
-      decay,
-      sustain,
-      release
-    );
+    // Get common synthesis parameters
+    // Ensure minimum gain of 0.3 so sounds are always audible
+    const gain = Math.max(0.3, getGainFromHap(value));
+    const pan = getPanFromHap(value);
+
+    // Check if this is a sample-based sound (drums, etc.)
+    const sampleName = isSampleBasedHap(value);
+
+    if (sampleName) {
+      // Track sample usage
+      if (!sampleStats[sampleName]) {
+        const isKnown = hasSample(sampleName);
+        sampleStats[sampleName] = { count: 0, loaded: isKnown };
+        if (!isKnown) {
+          logger.warn(
+            { sampleName, value: JSON.stringify(value).slice(0, 100) },
+            'Unknown sample name'
+          );
+        }
+      }
+      sampleStats[sampleName].count++;
+
+      // Get sample index (n parameter in Strudel)
+      const sampleIndex = typeof value?.n === 'number' ? value.n : 0;
+
+      // Calculate playback rate for pitch shifting melodic samples
+      // DISABLED: Pitch shifting was causing issues because samples have unknown base pitches
+      // For now, play all samples at their original pitch
+      // TODO: Re-enable with proper sample base pitch detection
+      const playbackRate = 1.0;
+
+      // Extract effects from hap value
+      const effects: SampleEffects = {};
+      if (typeof value === 'object' && value !== null) {
+        // Low pass filter (lpf or cutoff) - enforce minimum of 1000 Hz to prevent muffled sound
+        const lpfValue =
+          typeof value.lpf === 'number'
+            ? value.lpf
+            : typeof value.cutoff === 'number'
+              ? value.cutoff
+              : undefined;
+        if (lpfValue !== undefined) {
+          effects.lpf = Math.max(1000, lpfValue); // Don't go below 1000 Hz
+        }
+        // High pass filter
+        if (typeof value.hpf === 'number') effects.hpf = value.hpf;
+        // Reverb
+        if (typeof value.room === 'number') effects.room = value.room;
+        // Delay
+        if (typeof value.delay === 'number') effects.delay = value.delay;
+      }
+
+      // Use real samples or synthesizer fallback
+      await renderDrumSound(
+        offlineCtx,
+        leftGain,
+        rightGain,
+        sampleName,
+        sampleIndex,
+        Math.max(0, startTime),
+        gain,
+        pan,
+        playbackRate,
+        effects
+      );
+    } else {
+      // Use melodic synthesizer for note-based sounds
+      const frequency = getFrequencyFromHap(value);
+
+      // Get waveform type if specified
+      let waveform: OscillatorType = 'sine';
+      if (typeof value === 'object' && value !== null) {
+        if (value.wave) waveform = value.wave as OscillatorType;
+      }
+
+      // Get ADSR if specified
+      const attack = typeof value?.attack === 'number' ? value.attack : 0.01;
+      const decay = typeof value?.decay === 'number' ? value.decay : 0.1;
+      const sustain = typeof value?.sustain === 'number' ? value.sustain : 0.7;
+      const release = typeof value?.release === 'number' ? value.release : 0.1;
+
+      // Render the note
+      renderSynthNote(
+        offlineCtx,
+        leftGain,
+        rightGain,
+        frequency,
+        Math.max(0, startTime),
+        Math.min(hapDuration, duration - startTime),
+        gain,
+        pan,
+        waveform,
+        attack,
+        decay,
+        sustain,
+        release
+      );
+    }
 
     processedHaps++;
     if (onProgress && processedHaps % 100 === 0) {
       onProgress(Math.round((processedHaps / totalHaps) * 50)); // First 50% is scheduling
     }
   }
+
+  // Log rendered audio times for debugging
+  logger.info(
+    {
+      totalHaps: haps.length,
+      processedHaps,
+      skippedNoOnset,
+      skippedOutOfWindow,
+      cps,
+      renderedTimesSeconds: renderedTimes.slice(0, 20),
+      uniqueTimesCount: new Set(renderedTimes).size,
+      sampleStats,
+    },
+    'Audio scheduling complete'
+  );
 
   // If no haps were rendered, generate a short silence indicator beep
   if (processedHaps === 0) {
@@ -1462,6 +3289,24 @@ async function renderPatternToAudio(
   onProgress?.(50); // Halfway through - now rendering
   const renderedBuffer = await offlineCtx.startRendering();
   onProgress?.(90); // Nearly done
+
+  // Debug: Check audio levels at different time points
+  const debugChannel = renderedBuffer.getChannelData(0);
+  const debugTimes = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5];
+  const audioLevels: Record<string, number> = {};
+  for (const t of debugTimes) {
+    const startSample = Math.floor(t * sampleRate);
+    const endSample = Math.min(startSample + Math.floor(0.15 * sampleRate), debugChannel.length);
+    let max = 0;
+    for (let i = startSample; i < endSample; i++) {
+      max = Math.max(max, Math.abs(debugChannel[i] || 0));
+    }
+    audioLevels[`${t}s`] = Math.round(max * 1000) / 1000;
+  }
+  logger.info(
+    { audioLevels, totalSamples: debugChannel.length },
+    'Audio buffer levels at time points'
+  );
 
   // Convert AudioBuffer to interleaved Float32Array
   const numChannels = Math.min(channels, renderedBuffer.numberOfChannels);

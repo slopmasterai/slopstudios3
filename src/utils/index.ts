@@ -2,6 +2,12 @@
  * Utility functions for Slop Studios 3
  */
 
+// Re-export error utilities
+export * from './errors.js';
+
+// Re-export rate limiter utilities
+export * from './rate-limiter.js';
+
 /**
  * Generates a unique request ID
  */

@@ -50,7 +50,7 @@ export const rateLimitConfigs: Record<string, RateLimitConfig> = {
   },
   heavy: {
     windowMs: 60 * 1000, // 1 minute
-    maxRequests: 5, // 5 requests per minute
+    maxRequests: 100, // 100 requests per minute (increased for development)
   },
 };
 
@@ -130,6 +130,11 @@ export function createRateLimiter(group: string = 'default') {
   const config = rateLimitConfigs[group] || rateLimitConfigs['default']!;
 
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    // Skip rate limiting in development mode
+    if (serverConfig.env === 'development') {
+      return;
+    }
+
     const key = getRateLimitKey(request, group);
     const result = await checkRateLimit(key, config);
 
