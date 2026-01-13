@@ -1,4 +1,7 @@
 {
-  "*.{ts,tsx,js,jsx}": ["eslint --fix", "prettier --write"],
+  "*.{ts,tsx,js,jsx}": ["prettier --write"],
+  "src/**/*.{ts,tsx}": ["eslint --fix"],
+  "tests/**/*.{ts,tsx}": ["eslint --fix"],
+  "client/src/**/*.{ts,tsx}": ["cd client && eslint --fix"],
   "*.{json,md,yml,yaml,css,scss}": ["prettier --write"]
 }
