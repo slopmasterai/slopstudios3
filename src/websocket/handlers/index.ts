@@ -3,6 +3,7 @@
  * Exports all handler registration functions
  */
 
+import { registerAgentHandler } from './agent.handler.js';
 import { registerAuthHandler } from './auth.handler.js';
 import { registerClaudeHandler } from './claude.handler.js';
 import { registerConnectionHandler } from './connection.handler.js';
@@ -33,8 +34,10 @@ export function registerAllHandlers(socket: TypedSocket): void {
   registerHeartbeatHandler(socket);
   registerClaudeHandler(socket);
   registerStrudelHandler(socket);
+  registerAgentHandler(socket);
 }
 
+export { registerAgentHandler } from './agent.handler.js';
 export { registerConnectionHandler } from './connection.handler.js';
 export { registerAuthHandler } from './auth.handler.js';
 export { registerClaudeHandler } from './claude.handler.js';

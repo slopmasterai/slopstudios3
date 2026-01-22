@@ -79,18 +79,22 @@ slopstudios3/
 
 ## Available Scripts
 
-| Command                    | Description              |
-| -------------------------- | ------------------------ |
-| `npm run dev`              | Start development server |
-| `npm run build`            | Build for production     |
-| `npm run test`             | Run all tests            |
-| `npm run test:unit`        | Run unit tests           |
-| `npm run test:integration` | Run integration tests    |
-| `npm run test:e2e`         | Run end-to-end tests     |
-| `npm run lint`             | Run linter               |
-| `npm run lint:fix`         | Fix linting issues       |
-| `npm run format`           | Format code              |
-| `npm run typecheck`        | Run type checker         |
+| Command                    | Description                    |
+| -------------------------- | ------------------------------ |
+| `npm run dev`              | Start development server       |
+| `npm run dev:debug`        | Start with debugging enabled   |
+| `npm run build`            | Build for production           |
+| `npm run test`             | Run all tests                  |
+| `npm run test:unit`        | Run unit tests                 |
+| `npm run test:integration` | Run integration tests          |
+| `npm run test:e2e`         | Run end-to-end tests           |
+| `npm run lint`             | Run linter                     |
+| `npm run lint:fix`         | Fix linting issues             |
+| `npm run format`           | Format code                    |
+| `npm run typecheck`        | Run type checker               |
+| `npm run docs:api`         | Generate API documentation     |
+| `npm run docs:serve`       | Preview API documentation      |
+| `npm run docs:lint`        | Validate OpenAPI specification |
 
 ## Environment Variables
 
@@ -191,6 +195,44 @@ curl http://localhost:3000/api/v1/strudel/health
 See [Strudel Integration Documentation](docs/backend/strudel-integration.md) for
 details.
 
+## Agent Orchestration
+
+The platform includes a powerful multi-agent orchestration system:
+
+### Features
+
+- **Workflow Engine**: Execute multi-step AI workflows with sequential, parallel, conditional, and map-reduce patterns
+- **Agent Registry**: Manage and discover AI agents dynamically
+- **Prompt Templates**: Reusable, versioned prompt templates with variable substitution
+- **Self-Critique**: Iterative refinement of agent outputs
+- **Multi-Agent Discussions**: Collaborative decision-making between agents
+- **Real-time Updates**: WebSocket-based progress monitoring
+
+### Example
+
+```bash
+# Create a workflow
+curl -X POST http://localhost:3000/api/v1/agents/workflows \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow": {
+      "id": "research-workflow",
+      "steps": [
+        { "id": "research", "type": "claude", "prompt": "Research: {{topic}}" },
+        { "id": "summarize", "type": "claude", "prompt": "Summarize: {{research.output}}" }
+      ]
+    },
+    "context": { "topic": "AI safety" }
+  }'
+
+# Get workflow status
+curl http://localhost:3000/api/v1/agents/workflows/<id> \
+  -H "Authorization: Bearer <token>"
+```
+
+See [Agent Orchestration Documentation](docs/guides/agent-orchestration.md) for details.
+
 ## Development
 
 ### Code Style
@@ -221,12 +263,25 @@ npm run test:watch
 
 ## Documentation
 
+### Guides
+- [Getting Started](docs/guides/getting-started.md)
+- [Claude Integration](docs/guides/claude-integration.md)
+- [Agent Orchestration](docs/guides/agent-orchestration.md)
+- [WebSocket Integration](docs/guides/websocket-integration.md)
+
+### API
+- [OpenAPI Specification](docs/api/openapi.yaml)
+- [Agent Endpoints](docs/api/agent-endpoints.md)
+
+### Operations
+- [Production Checklist](docs/deployment/production-checklist.md)
+- [Troubleshooting Guide](docs/operations/troubleshooting.md)
+
+### Development
 - [Contributing Guide](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 - [Architecture Decision Records](docs/adr/)
-- [API Documentation](docs/api/)
-- [Claude Integration](docs/backend/claude-integration.md)
-- [Strudel Integration](docs/backend/strudel-integration.md)
+- [Frontend Integration](docs/frontend/integration-guide.md)
 
 ## Deployment
 

@@ -1,0 +1,49 @@
+# Local Development - Database Services Only
+# Backend runs natively to access Claude CLI
+#
+# Usage:
+#   docker-compose -f docker-compose.local.yml up -d
+#
+# Then run backend with: npm run dev
+
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: slopstudios-db-local
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: slopstudios3
+    volumes:
+      - postgres-local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: slopstudios-redis-local
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-local:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-local:
+    driver: local
+  redis-local:
+    driver: local

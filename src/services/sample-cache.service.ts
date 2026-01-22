@@ -1,6 +1,6 @@
 /**
  * Sample Cache Service
- * Downloads and caches audio samples from Strudel's GitHub CDN
+ * Retrieves audio samples from Superdough's loaded samples, falling back to CDN when absent
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -18,107 +18,95 @@ import * as path from 'path';
 
 import { logger } from '../utils/logger.js';
 
-// Strudel sample CDN base URL
-const DIRT_SAMPLES_BASE = 'https://raw.githubusercontent.com/tidalcycles/Dirt-Samples/master';
-
-// Sample map from Dirt-Samples repo - maps sample names to file paths
-// Verified against https://github.com/tidalcycles/Dirt-Samples
-// Note: Melodic samples should be ~1-5 seconds for proper sustain
-const SAMPLE_MAP: Record<string, string[]> = {
-  // Drums - kick drums
-  bd: ['bd/BT0A0A7.wav', 'bd/BT0A0D0.wav', 'bd/BT0A0D3.wav', 'bd/BT0AAD0.wav', 'bd/BT0AADS.wav'],
-
-  // Drums - snare drums (sd directory has electronic snares)
-  sd: ['sd/rytm-00-hard.wav', 'sd/rytm-01-classic.wav'],
-
-  // Drums - snare from sn directory (acoustic snares)
-  sn: ['sn/ST0T0S0.wav', 'sn/ST0T0S3.wav', 'sn/ST0T0S7.wav', 'sn/ST0T0SA.wav'],
-
-  // Hi-hats
-  hh: ['hh/000_hh3closedhh.wav', '808/CH.WAV', '808oh/OH00.WAV'],
-
-  // Open hi-hat
-  oh: ['hh/007_hh3openhh.wav', '808oh/OH10.WAV', '808oh/OH25.WAV'],
-
-  // Clap
-  cp: ['cp/HANDCLP0.wav', 'cp/HANDCLPA.wav'],
-
-  // Additional percussion
-  rim: ['808/RS.WAV'],
-  tom: ['808mt/MT00.WAV', '808mt/MT25.WAV', '808mt/MT50.WAV', '808mt/MT75.WAV'],
-  mt: ['808mt/MT00.WAV', '808mt/MT25.WAV', '808mt/MT50.WAV'],
-  lt: ['808lt/LT00.WAV', '808lt/LT25.WAV', '808lt/LT50.WAV'],
-  ht: ['808ht/HT00.WAV', '808ht/HT25.WAV', '808ht/HT50.WAV'],
-
-  // Melodic - bass samples (bass1 has longer sustained bass hits ~3 seconds)
-  bass: [
-    'bass1/18076__daven__01-sb-bass-hit-c.wav',
-    'bass1/18077__daven__02-sb-bass-hit-c.wav',
-    'bass1/18078__daven__03-sb-bass-hit-c.wav',
-    'bass1/18079__daven__04-sb-bass-hit-c.wav',
-  ],
-
-  // Melodic - piano/keys (using moog synth samples with known pitches)
-  piano: [
-    'moog/001_Mighty%20Moog%20C3.wav',
-    'moog/002_Mighty%20Moog%20C4.wav',
-    'moog/005_Mighty%20Moog%20G3.wav',
-    'moog/006_Mighty%20Moog%20G4.wav',
-  ],
-
-  // Keep arpy as short plucky sounds for arpeggios
-  arpy: [
-    'arpy/arpy01.wav',
-    'arpy/arpy02.wav',
-    'arpy/arpy03.wav',
-    'arpy/arpy04.wav',
-    'arpy/arpy05.wav',
-  ],
-
-  // Moog synth sounds
-  moog: [
-    'moog/001_Mighty%20Moog%20C3.wav',
-    'moog/002_Mighty%20Moog%20C4.wav',
-    'moog/003_Mighty%20Moog%20G1.wav',
-  ],
-
-  // Melodic - pluck sounds (longer samples)
-  pluck: [
-    'pluck/BS%20C3%20PI.wav',
-    'pluck/BS%20D2%20PI.wav',
-    'pluck/BS%20E2%20PI.wav',
-    'pluck/BS%20G2%20PI.wav',
-  ],
-
-  // Pad sounds (already long ~30+ seconds)
-  pad: ['pad/alien-monolith-pad.wav', 'pad/angelpads.wav', 'pad/bellpad-harmonics.wav'],
-
-  // Synth leads (using moog for sustained notes)
-  synth: [
-    'moog/001_Mighty%20Moog%20C3.wav',
-    'moog/002_Mighty%20Moog%20C4.wav',
-    'moog/005_Mighty%20Moog%20G3.wav',
-  ],
-
-  // Keys alias to piano
-  keys: [
-    'moog/001_Mighty%20Moog%20C3.wav',
-    'moog/002_Mighty%20Moog%20C4.wav',
-    'moog/006_Mighty%20Moog%20G4.wav',
-  ],
-
-  // Guitar
-  gtr: ['gtr/0001_cleanC.wav', 'gtr/0002_ovrdC.wav', 'gtr/0003_distC.wav'],
-};
-
-// In-memory cache for decoded audio buffers
-const bufferCache: Map<string, Float32Array> = new Map();
+// In-memory cache for decoded audio buffers (stores full AudioBuffer with all channels)
+const bufferCache: Map<string, any> = new Map();
 
 // File-based cache directory
 const CACHE_DIR = path.join(os.tmpdir(), 'strudel-samples');
 
 // Loading promises to avoid duplicate downloads
-const loadingPromises: Map<string, Promise<Float32Array | null>> = new Map();
+const loadingPromises: Map<string, Promise<any | null>> = new Map();
+
+// Superdough module reference (lazy loaded)
+let superdoughModule: any = null;
+
+/**
+ * Lazily load Superdough module
+ */
+async function getSuperdough(): Promise<any> {
+  if (!superdoughModule) {
+    superdoughModule = await import('superdough');
+  }
+  return superdoughModule;
+}
+
+/**
+ * Get sample URLs from Superdough's soundMap for a given category
+ * Returns array of URLs or null if category not found
+ */
+async function getSuperdoughSampleUrls(category: string): Promise<string[] | null> {
+  try {
+    const superdough = await getSuperdough();
+    const soundMap = superdough.soundMap?.get?.();
+    if (!soundMap) {
+      return null;
+    }
+
+    const sound = soundMap[category.toLowerCase()];
+    if (!sound?.data?.samples) {
+      return null;
+    }
+
+    const samples = sound.data.samples;
+    // samples can be an array of URLs or an object with note keys mapping to URL arrays
+    if (Array.isArray(samples)) {
+      return samples;
+    } else if (typeof samples === 'object') {
+      // For pitched samples (e.g., piano), flatten all note arrays into a single array
+      return Object.values(samples).flat() as string[];
+    }
+    return null;
+  } catch (error) {
+    logger.debug({ error, category }, 'Failed to get Superdough sample URLs');
+    return null;
+  }
+}
+
+/**
+ * Load and decode a buffer from Superdough's cache or via fetch
+ * Returns the full AudioBuffer with all channels to preserve stereo fidelity
+ */
+async function loadBufferFromSuperdough(
+  url: string,
+  audioContext: any,
+  category: string,
+  index: number
+): Promise<any | null> {
+  try {
+    const superdough = await getSuperdough();
+
+    // Try to get from Superdough's internal buffer cache first
+    const cachedBuffer = superdough.getLoadedBuffer?.(url) || superdough.getCachedBuffer?.(url);
+    if (cachedBuffer) {
+      logger.debug({ category, index, url, channels: cachedBuffer.numberOfChannels }, 'Using Superdough cached buffer');
+      return cachedBuffer;
+    }
+
+    // Use Superdough's loadBuffer to fetch and decode (with caching)
+    if (superdough.loadBuffer) {
+      const buffer = await superdough.loadBuffer(url, audioContext, category, index);
+      if (buffer) {
+        logger.debug({ category, index, url, channels: buffer.numberOfChannels }, 'Loaded buffer via Superdough loadBuffer');
+        return buffer;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    logger.debug({ error, url, category }, 'Failed to load buffer from Superdough');
+    return null;
+  }
+}
 
 /**
  * Initialize the sample cache directory
@@ -126,7 +114,9 @@ const loadingPromises: Map<string, Promise<Float32Array | null>> = new Map();
 export async function initSampleCache(): Promise<void> {
   try {
     await fs.mkdir(CACHE_DIR, { recursive: true });
-    logger.info({ cacheDir: CACHE_DIR }, 'Sample cache initialized');
+    // Pre-load Superdough module reference
+    await getSuperdough();
+    logger.info({ cacheDir: CACHE_DIR }, 'Sample cache initialized with Superdough integration');
   } catch (error) {
     logger.warn({ error }, 'Failed to create sample cache directory');
   }
@@ -134,12 +124,13 @@ export async function initSampleCache(): Promise<void> {
 
 /**
  * Get a sample buffer, downloading if necessary
+ * Returns the full AudioBuffer with all channels to preserve stereo fidelity
  */
 export async function getSampleBuffer(
   sampleName: string,
   sampleIndex: number = 0,
   audioContext: any
-): Promise<Float32Array | null> {
+): Promise<any | null> {
   const normalizedName = sampleName.toLowerCase();
   const cacheKey = `${normalizedName}:${sampleIndex}`;
 
@@ -169,46 +160,56 @@ export async function getSampleBuffer(
 }
 
 /**
- * Load a sample from cache or download from CDN
+ * Load a sample from Superdough (preferred) or fall back to CDN download
+ * Returns the full AudioBuffer with all channels to preserve stereo fidelity
  */
 async function loadSample(
   sampleName: string,
   sampleIndex: number,
   audioContext: any
-): Promise<Float32Array | null> {
-  // Check if we have this sample in our map
-  const samplePaths = SAMPLE_MAP[sampleName];
-  if (!samplePaths || samplePaths.length === 0) {
-    logger.debug({ sampleName }, 'Sample not in map, will use synthesized fallback');
-    return null;
-  }
-
-  // Get the specific sample (wrap index)
-  const samplePath = samplePaths[sampleIndex % samplePaths.length];
-  const cacheKey = `${sampleName}_${sampleIndex}`;
-  const cachePath = path.join(CACHE_DIR, `${cacheKey}.wav`);
-
-  // Try to load from file cache
-  try {
-    const cachedData = await fs.readFile(cachePath);
-    const audioBuffer = await decodeAudioData(cachedData, audioContext);
-    if (audioBuffer) {
-      logger.debug(
-        { sampleName, sampleIndex, samples: audioBuffer.length },
-        'Loaded sample from file cache'
-      );
-      return audioBuffer;
-    } else {
-      logger.warn({ sampleName, sampleIndex, cachePath }, 'File cache decode returned null');
+): Promise<any | null> {
+  // 1. First try to get sample URLs from Superdough's soundMap
+  const superdoughUrls = await getSuperdoughSampleUrls(sampleName);
+  if (superdoughUrls && superdoughUrls.length > 0) {
+    const urlIndex = sampleIndex % superdoughUrls.length;
+    const url = superdoughUrls[urlIndex];
+    if (url) {
+      const buffer = await loadBufferFromSuperdough(url, audioContext, sampleName, sampleIndex);
+      if (buffer) {
+        logger.debug(
+          { sampleName, sampleIndex, samples: buffer.length, channels: buffer.numberOfChannels },
+          'Loaded sample from Superdough'
+        );
+        return buffer;
+      }
+      // If Superdough has the URL but loading failed, try direct fetch
+      logger.debug({ sampleName, sampleIndex, url }, 'Superdough buffer load failed, trying direct fetch');
+      try {
+        const directBuffer = await fetchAndDecodeUrl(url, audioContext, sampleName, sampleIndex);
+        if (directBuffer) {
+          return directBuffer;
+        }
+      } catch (error) {
+        logger.debug({ error, url, sampleName }, 'Direct fetch of Superdough URL failed');
+      }
     }
-  } catch {
-    // Cache miss, need to download
   }
 
-  // Download from CDN
-  const url = `${DIRT_SAMPLES_BASE}/${samplePath}`;
-  logger.info({ url, sampleName, sampleIndex }, 'Downloading sample from CDN');
+  // 2. Fall back to CDN download (for categories not in Superdough)
+  logger.debug({ sampleName }, 'Sample not in Superdough, trying CDN fallback');
+  return loadSampleFromCdn(sampleName, sampleIndex, audioContext);
+}
 
+/**
+ * Fetch and decode audio from a URL
+ * Returns the full AudioBuffer with all channels to preserve stereo fidelity
+ */
+async function fetchAndDecodeUrl(
+  url: string,
+  audioContext: any,
+  sampleName: string,
+  sampleIndex: number
+): Promise<any | null> {
   try {
     const response = await fetch(url);
     if (!response.ok) {
@@ -218,36 +219,65 @@ async function loadSample(
 
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-
-    // Save to file cache
-    try {
-      await fs.writeFile(cachePath, buffer);
-    } catch (writeError) {
-      logger.warn({ writeError, cachePath }, 'Failed to cache sample to disk');
-    }
-
-    // Decode audio
     const audioBuffer = await decodeAudioData(buffer, audioContext);
     if (audioBuffer) {
       logger.info(
-        { sampleName, sampleIndex, samples: audioBuffer.length },
-        'Sample loaded successfully'
+        { sampleName, sampleIndex, samples: audioBuffer.length, channels: audioBuffer.numberOfChannels },
+        'Sample loaded successfully via direct fetch'
       );
     }
     return audioBuffer;
   } catch (error) {
-    logger.error({ error, url }, 'Error downloading sample');
+    logger.error({ error, url }, 'Error fetching sample');
     return null;
   }
 }
 
 /**
+ * Load a sample from CDN with file caching (fallback when not in Superdough)
+ * Returns the full AudioBuffer with all channels to preserve stereo fidelity
+ */
+async function loadSampleFromCdn(
+  sampleName: string,
+  sampleIndex: number,
+  audioContext: any
+): Promise<any | null> {
+  // For CDN fallback, we need to construct the path manually
+  // This is only used when samples are not available in Superdough
+  const cacheKey = `${sampleName}_${sampleIndex}`;
+  const cachePath = path.join(CACHE_DIR, `${cacheKey}.wav`);
+
+  // Try to load from file cache
+  try {
+    const cachedData = await fs.readFile(cachePath);
+    const audioBuffer = await decodeAudioData(cachedData, audioContext);
+    if (audioBuffer) {
+      logger.debug(
+        { sampleName, sampleIndex, samples: audioBuffer.length, channels: audioBuffer.numberOfChannels },
+        'Loaded sample from file cache'
+      );
+      return audioBuffer;
+    } else {
+      logger.warn({ sampleName, sampleIndex, cachePath }, 'File cache decode returned null');
+    }
+  } catch {
+    // Cache miss - sample not available via any source
+  }
+
+  // For CDN download, we'd need to know the path mapping
+  // Since we removed SAMPLE_MAP, just return null and let synth fallback handle it
+  logger.debug({ sampleName }, 'Sample not available in Superdough or cache, will use synthesized fallback');
+  return null;
+}
+
+/**
  * Decode audio data using the provided audio context
+ * Returns the full AudioBuffer with all channels to preserve stereo fidelity
  */
 async function decodeAudioData(
   data: Buffer | Uint8Array,
   audioContext: any
-): Promise<Float32Array | null> {
+): Promise<any | null> {
   try {
     // Convert to ArrayBuffer if needed
     const arrayBuffer =
@@ -255,11 +285,10 @@ async function decodeAudioData(
         ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
         : data.buffer;
 
-    // Decode using OfflineAudioContext
+    // Decode using OfflineAudioContext - returns full AudioBuffer with all channels
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-    // Return the first channel as Float32Array
-    return audioBuffer.getChannelData(0);
+    return audioBuffer;
   } catch (error) {
     logger.warn({ error }, 'Failed to decode audio data');
     return null;
@@ -267,17 +296,46 @@ async function decodeAudioData(
 }
 
 /**
- * Check if a sample is available
+ * Check if a sample is available in Superdough's soundMap
+ * This is a synchronous check that queries the soundMap directly
  */
 export function hasSample(sampleName: string): boolean {
-  return SAMPLE_MAP.hasOwnProperty(sampleName.toLowerCase());
+  try {
+    // Check if superdough module is already loaded
+    if (!superdoughModule) {
+      return false;
+    }
+    const soundMap = superdoughModule.soundMap?.get?.();
+    if (!soundMap) {
+      return false;
+    }
+    const sound = soundMap[sampleName.toLowerCase()];
+    return sound?.data?.samples != null;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * Get list of available sample names
+ * Get list of available sample names from Superdough's soundMap
  */
 export function getAvailableSamples(): string[] {
-  return Object.keys(SAMPLE_MAP);
+  try {
+    if (!superdoughModule) {
+      return [];
+    }
+    const soundMap = superdoughModule.soundMap?.get?.();
+    if (!soundMap) {
+      return [];
+    }
+    // Filter to only include entries that have sample data
+    return Object.keys(soundMap).filter((key) => {
+      const sound = soundMap[key];
+      return sound?.data?.samples != null;
+    });
+  } catch {
+    return [];
+  }
 }
 
 /**

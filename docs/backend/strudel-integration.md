@@ -186,27 +186,57 @@ Non-blocking suggestions:
 
 ## Audio Rendering
 
-### Current Implementation (Mock)
+### Current Implementation (Superdough Integration)
 
-The current implementation uses mock audio buffer generation:
+The audio rendering system now uses Superdough for improved sample playback and
+effects processing with access to 220+ Dirt-Samples categories:
 
-```javascript
-function generateMockAudioBuffer(durationSeconds, sampleRate, channels) {
-  const numSamples = Math.floor(durationSeconds * sampleRate);
-  const buffer = new Float32Array(numSamples * channels);
+```typescript
+// Pattern evaluation using Strudel transpiler
+const evaluatedPattern = await evaluate(config.code);
 
-  // Generate simple sine wave for testing
-  const frequency = 440;
-  for (let i = 0; i < numSamples; i++) {
-    const sample = Math.sin((2 * Math.PI * frequency * i) / sampleRate) * 0.5;
-    for (let ch = 0; ch < channels; ch++) {
-      buffer[i * channels + ch] = sample;
-    }
-  }
+// Render using OfflineAudioContext
+const audioBuffer = await renderPatternToAudio(
+  evaluatedPattern,
+  options.duration,
+  options.sampleRate,
+  options.channels,
+  cps,
+  onProgress
+);
 
-  return buffer;
-}
+// Export to WAV format
+const { data, fileSize } = exportAudioBuffer(audioBuffer, 'wav', sampleRate, channels);
 ```
+
+### Sample Loading
+
+Samples are loaded from the Dirt-Samples repository via Superdough:
+
+```typescript
+import { initStrudelSamples, isSampleCategoryAvailable } from './strudel-samples.service';
+
+// Initialize samples from Dirt-Samples repository
+await initStrudelSamples();
+
+// Check if a sample category is available
+const hasBass = isSampleCategoryAvailable('bass'); // true - 220+ categories available
+```
+
+### Effects Chain
+
+The effects chain follows Superdough's order for consistent audio processing:
+
+1. Gain (input gain)
+2. Lowpass Filter (lpf)
+3. Highpass Filter (hpf)
+4. Bandpass Filter (bpf)
+5. Waveshape (shape)
+6. Distortion (distort)
+7. Reverb (room, roomsize)
+8. Delay (delay, delaytime, delayfeedback)
+9. Panning (pan)
+10. Postgain (output gain)
 
 ### WAV Export
 
@@ -225,14 +255,29 @@ function bufferToWav(buffer, sampleRate, channels) {
 }
 ```
 
-### Future Implementation
+### Client-Side Real-Time Playback
 
-When integrating real Strudel audio rendering:
+The client now supports real-time playback using Superdough:
 
-1. Use `@strudel/webaudio` in a Worker thread
-2. Transpile patterns with `@strudel/transpiler`
-3. Render to OfflineAudioContext
-4. Export to various formats (WAV, MP3, OGG, FLAC)
+```typescript
+import { useStrudelPlayer } from '@/hooks/useStrudelPlayer';
+
+function StrudelEditor() {
+  const { isPlaying, play, stop, samplesLoaded } = useStrudelPlayer();
+
+  // Initialize on first user interaction
+  // Loads 220+ sample categories from Dirt-Samples
+  const handlePlay = async () => {
+    await play('s("bd sd hh sd")');
+  };
+
+  return (
+    <button onClick={isPlaying ? stop : handlePlay}>
+      {isPlaying ? 'Stop' : 'Live Play'}
+    </button>
+  );
+}
+```
 
 ## Configuration
 
@@ -519,9 +564,26 @@ breakdowns.
 
 ## Related Documentation
 
+### Internal Documentation
+
+- [Strudel Audio Architecture](./strudel-audio-architecture.md) - Deep dive into
+  Strudel's Superdough audio engine, scheduler, and effects chain
+- [Strudel Migration Guide](./strudel-migration-guide.md) - Step-by-step guide
+  for migrating to Superdough-based audio rendering
+- [Strudel Testing Strategy](./strudel-testing-strategy.md) - Comprehensive
+  testing and validation strategy for audio quality
+- [Strudel API Reference](./strudel-api-reference.md) - Complete API reference
+  for Superdough, patterns, and effects
 - [Server Architecture](./server-architecture.md)
 - [WebSocket Events](./websocket-events.md)
 - [Claude Integration](./claude-integration.md)
 - [Strudel API Endpoints](../api/strudel-endpoints.md)
 - [ADR: Strudel Integration](../adr/0005-strudel-integration.md)
+
+### External Resources
+
 - [Strudel Documentation](https://strudel.cc)
+- [Strudel Repository (Codeberg)](https://codeberg.org/uzu/strudel)
+- [Superdough npm](https://www.npmjs.com/package/superdough)
+- [Dirt-Samples Repository](https://github.com/tidalcycles/Dirt-Samples)
+- [Strudel Technical Manual](https://strudel.cc/technical-manual/)

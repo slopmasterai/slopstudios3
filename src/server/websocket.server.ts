@@ -37,6 +37,7 @@ const MAX_CONNECTIONS_PER_WINDOW = 10; // Max 10 connections per minute per IP/u
 
 interface JwtPayload {
   userId?: string;
+  id?: string;
   sub?: string;
   email?: string;
   exp?: number;
@@ -156,7 +157,7 @@ function verifyJwtToken(token: string): { valid: boolean; payload?: JwtPayload; 
   try {
     const decoded = jwt.verify(token, serverConfig.jwt.secret) as JwtPayload;
 
-    const userId = decoded.userId || decoded.sub;
+    const userId = decoded.userId || decoded.id || decoded.sub;
     if (!userId) {
       return { valid: false, error: 'Token missing user identifier' };
     }
@@ -243,7 +244,7 @@ async function connectionMiddleware(
         return;
       }
 
-      userId = jwtResult.payload?.userId || jwtResult.payload?.sub;
+      userId = jwtResult.payload?.userId || jwtResult.payload?.id || jwtResult.payload?.sub;
       authMethod = 'jwt';
       socket.data.token = token;
     }

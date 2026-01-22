@@ -3,6 +3,16 @@
 This document describes the REST API endpoints for Strudel live coding music
 integration.
 
+> **Recommended Approach**: For most use cases, we recommend using **real-time Web Audio playback** via the `useStrudelPlayer` hook instead of these server-side rendering endpoints. Real-time playback provides:
+> - Instant feedback (50-150ms latency)
+> - Full Dirt-Samples library (220+ categories)
+> - Pattern hot-swapping while playing
+> - No server load
+>
+> Use these endpoints only when you need **downloadable audio files** (WAV export).
+>
+> See the [Approach Selection Guide](../guides/strudel-approach-selection.md) for details.
+
 ## Base URL
 
 ```

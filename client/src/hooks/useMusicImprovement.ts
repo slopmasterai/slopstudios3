@@ -109,6 +109,7 @@ export function useMusicImprovement() {
       }));
 
       emit('agent:discussion:execute', {
+        id: discussionId,
         topic,
         config: {
           ...MUSIC_DISCUSSION_CONFIG,

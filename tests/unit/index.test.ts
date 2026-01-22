@@ -1,8 +1,11 @@
 /**
  * Unit Tests for Main Entry Point
+ *
+ * Note: The main function is async and initializes the full server,
+ * so it's not suitable for unit testing. We only test the VERSION export.
  */
 
-import { VERSION, main } from '../../src/index';
+import { VERSION } from '../../src/index';
 
 describe('Main Entry Point', () => {
   describe('VERSION', () => {
@@ -12,28 +15,6 @@ describe('Main Entry Point', () => {
 
     it('should follow semver format', () => {
       expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/);
-    });
-  });
-
-  describe('main', () => {
-    let consoleSpy: jest.SpyInstance;
-
-    beforeEach(() => {
-      consoleSpy = jest.spyOn(console, 'log').mockImplementation();
-    });
-
-    afterEach(() => {
-      consoleSpy.mockRestore();
-    });
-
-    it('should log the application name and version', () => {
-      main();
-      expect(consoleSpy).toHaveBeenCalledWith(`Slop Studios 3 v${VERSION}`);
-    });
-
-    it('should return undefined', () => {
-      const result = main();
-      expect(result).toBeUndefined();
     });
   });
 });

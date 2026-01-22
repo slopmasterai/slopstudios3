@@ -35,6 +35,9 @@ let NodeOfflineAudioContext: any = null;
 let evaluate: ((code: string) => Promise<any>) | null = null;
 let strudelCore: any = null;
 
+// Superdough lazy-loaded module
+let superdoughModule: any = null;
+
 /**
  * Lazily loads the Strudel and web-audio-engine modules
  * This is needed for Jest compatibility since these are ESM-only modules
@@ -62,6 +65,14 @@ async function loadStrudelModules(): Promise<boolean> {
     Object.assign(globalThis, strudelCore);
     Object.assign(globalThis, miniModule);
 
+    // Load Superdough for sample loading and effect parsing
+    try {
+      superdoughModule = await import('superdough');
+      logger.info('Superdough module loaded successfully');
+    } catch (superdoughError) {
+      logger.warn({ error: superdoughError }, 'Failed to load Superdough module');
+    }
+
     return true;
   } catch (error) {
     logger.warn({ error }, 'Failed to load Strudel modules');
@@ -75,6 +86,20 @@ import { logger } from '../utils/logger.js';
 import { getRedisClient, isRedisConnected } from './redis.service.js';
 import { getSampleBuffer, hasSample, initSampleCache } from './sample-cache.service.js';
 import { recordStrudelMetrics } from './strudel-metrics.service.js';
+import {
+  initStrudelSamples,
+  areSamplesLoaded,
+  isSampleCategoryAvailable,
+  getAvailableSampleCategories,
+} from './strudel-samples.service.js';
+import {
+  buildEffectsChain,
+  extractEffectParams,
+  applyPostProcessingEffectsMultiChannel,
+  createOrbitBuses,
+  type EffectParams,
+  type OrbitBus,
+} from './strudel-effects.service.js';
 
 import type {
   StrudelValidationResult,
@@ -193,6 +218,18 @@ export async function initializeStrudelService(
   // Initialize sample cache for real sample playback
   await initSampleCache();
   logger.info('Sample cache initialized');
+
+  // Initialize Strudel samples from Dirt-Samples repository via Superdough
+  try {
+    await initStrudelSamples();
+    const categories = getAvailableSampleCategories();
+    logger.info(
+      { categoryCount: categories.length, samplesLoaded: areSamplesLoaded() },
+      'Strudel samples initialized from Dirt-Samples'
+    );
+  } catch (sampleError) {
+    logger.warn({ error: sampleError }, 'Failed to initialize Strudel samples, using fallback');
+  }
 
   // Start queue worker if enabled
   if (serviceConfig.enableQueue) {
@@ -2743,8 +2780,9 @@ const soundLibrary: Record<string, SoundParams> = {
 
 /**
  * Renders a sample buffer to the audio context
+ * Sample effects interface extends the full EffectParams for comprehensive effect support
  */
-interface SampleEffects {
+interface SampleEffects extends Partial<EffectParams> {
   lpf?: number; // Low pass filter frequency
   hpf?: number; // High pass filter frequency
   room?: number; // Reverb amount 0-1
@@ -2755,16 +2793,31 @@ function renderSampleBuffer(
   offlineCtx: any,
   destinationL: any,
   destinationR: any,
-  sampleData: Float32Array,
+  sampleBuffer: any, // AudioBuffer from Web Audio API with all channels preserved
   startTime: number,
   gain: number,
   pan: number,
   playbackRate: number = 1.0,
-  effects: SampleEffects = {}
+  effects: SampleEffects = {},
+  orbitBus?: OrbitBus
 ): void {
-  // Create an AudioBuffer from the sample data
-  const audioBuffer = offlineCtx.createBuffer(1, sampleData.length, offlineCtx.sampleRate);
-  audioBuffer.copyToChannel(sampleData, 0);
+  // Apply post-processing effects (coarse/crush) to all channels of the sample buffer
+  // These are buffer-based effects that must be applied before audio graph processing
+  const effectParams = extractEffectParams(effects);
+  const processedChannels = applyPostProcessingEffectsMultiChannel(sampleBuffer, effectParams);
+
+  // Create an AudioBuffer with the original channel count to preserve stereo fidelity
+  const channelCount = processedChannels.length;
+  const bufferLength = processedChannels[0]?.length ?? 0;
+  const audioBuffer = offlineCtx.createBuffer(channelCount, bufferLength, offlineCtx.sampleRate);
+
+  // Copy all processed channels to the new AudioBuffer
+  for (let channel = 0; channel < channelCount; channel++) {
+    const channelData = processedChannels[channel];
+    if (channelData) {
+      audioBuffer.copyToChannel(channelData, channel);
+    }
+  }
 
   // Create buffer source
   const source = offlineCtx.createBufferSource();
@@ -2773,117 +2826,23 @@ function renderSampleBuffer(
   // Apply pitch shifting via playback rate
   source.playbackRate.value = playbackRate;
 
-  // Create gain node
-  const gainNode = offlineCtx.createGain();
-  gainNode.gain.value = gain;
+  // Build complete effect params including gain and pan
+  const fullEffectParams: EffectParams = {
+    ...effectParams,
+    gain: gain,
+    pan: (pan + 1) / 2, // Convert from -1..1 to 0..1 range expected by buildEffectsChain
+  };
 
-  // Build the audio chain: source -> [filters] -> gain -> pan -> destination
-  let lastNode: any = source;
+  // Build the effects chain using the shared strudel-effects.service
+  // This applies the full Superdough effect chain:
+  // gain -> lpf -> hpf -> bpf -> vowel -> coarse/crush (buffer) -> shape -> distort
+  // -> tremolo -> compressor -> pan -> phaser -> postgain -> reverb/delay (via orbit bus)
+  // The buffer source preserves the original channel count (stereo samples remain stereo)
+  const { leftOutput, rightOutput } = buildEffectsChain(offlineCtx, source, fullEffectParams, orbitBus);
 
-  // Apply low pass filter if specified
-  if (effects.lpf && effects.lpf < 20000) {
-    const lpfNode = offlineCtx.createBiquadFilter();
-    lpfNode.type = 'lowpass';
-    lpfNode.frequency.value = effects.lpf;
-    lpfNode.Q.value = 1;
-    lastNode.connect(lpfNode);
-    lastNode = lpfNode;
-  }
-
-  // Apply high pass filter if specified
-  if (effects.hpf && effects.hpf > 20) {
-    const hpfNode = offlineCtx.createBiquadFilter();
-    hpfNode.type = 'highpass';
-    hpfNode.frequency.value = effects.hpf;
-    hpfNode.Q.value = 1;
-    lastNode.connect(hpfNode);
-    lastNode = hpfNode;
-  }
-
-  // Connect to gain
-  lastNode.connect(gainNode);
-
-  // Apply panning
-  const leftGainVal = Math.cos(((pan + 1) * Math.PI) / 4);
-  const rightGainVal = Math.sin(((pan + 1) * Math.PI) / 4);
-
-  const leftPan = offlineCtx.createGain();
-  const rightPan = offlineCtx.createGain();
-  leftPan.gain.value = leftGainVal;
-  rightPan.gain.value = rightGainVal;
-
-  // Determine dry/wet mix based on effects
-  const hasDelay = effects.delay && effects.delay > 0;
-  const hasRoom = effects.room && effects.room > 0;
-
-  if (!hasDelay && !hasRoom) {
-    // No effects - direct connection
-    gainNode.connect(leftPan);
-    gainNode.connect(rightPan);
-    leftPan.connect(destinationL);
-    rightPan.connect(destinationR);
-  } else {
-    // Create wet/dry mix
-    const dryGain = offlineCtx.createGain();
-    const wetGain = offlineCtx.createGain();
-
-    // Calculate wet amount (combine delay and room)
-    const delayAmount = effects.delay || 0;
-    const roomAmount = effects.room || 0;
-    const totalWet = Math.min(0.7, delayAmount * 0.5 + roomAmount * 0.5);
-    const dryAmount = 1 - totalWet * 0.5; // Keep dry signal prominent
-
-    dryGain.gain.value = dryAmount;
-    wetGain.gain.value = totalWet;
-
-    // Dry path
-    gainNode.connect(dryGain);
-    dryGain.connect(leftPan);
-    dryGain.connect(rightPan);
-
-    // Wet path with delay/reverb
-    if (hasDelay) {
-      // Simple delay effect
-      const delayNode = offlineCtx.createDelay(1.0);
-      delayNode.delayTime.value = 0.25; // 250ms delay
-
-      const feedbackGain = offlineCtx.createGain();
-      feedbackGain.gain.value = delayAmount * 0.4; // Feedback based on delay amount
-
-      gainNode.connect(delayNode);
-      delayNode.connect(feedbackGain);
-      feedbackGain.connect(delayNode); // Feedback loop
-      delayNode.connect(wetGain);
-    }
-
-    if (hasRoom) {
-      // Simple reverb using multiple delay lines
-      const reverbDelays = [0.029, 0.037, 0.041, 0.053]; // Prime-ish delays for diffusion
-      const reverbGains = [0.25, 0.25, 0.25, 0.25];
-
-      for (let i = 0; i < reverbDelays.length; i++) {
-        const reverbDelay = offlineCtx.createDelay(0.1);
-        reverbDelay.delayTime.value = reverbDelays[i] ?? 0.03;
-        const reverbDelayGain = offlineCtx.createGain();
-        reverbDelayGain.gain.value = (reverbGains[i] ?? 0.25) * roomAmount;
-
-        gainNode.connect(reverbDelay);
-        reverbDelay.connect(reverbDelayGain);
-        reverbDelayGain.connect(wetGain);
-      }
-    }
-
-    // If neither delay nor room added wet signal, connect dry directly
-    if (!hasDelay && !hasRoom) {
-      gainNode.connect(wetGain);
-    }
-
-    wetGain.connect(leftPan);
-    wetGain.connect(rightPan);
-
-    leftPan.connect(destinationL);
-    rightPan.connect(destinationR);
-  }
+  // Connect stereo outputs to destinations
+  leftOutput.connect(destinationL);
+  rightOutput.connect(destinationR);
 
   // Start playback
   source.start(startTime);
@@ -2891,6 +2850,7 @@ function renderSampleBuffer(
 
 /**
  * Synthesizes a sound based on sample name using comprehensive sound library
+ * With Superdough integration for improved sample coverage (220+ categories)
  */
 async function renderDrumSound(
   offlineCtx: any,
@@ -2902,10 +2862,15 @@ async function renderDrumSound(
   gain: number,
   pan: number,
   playbackRate: number = 1.0,
-  effects: SampleEffects = {}
+  effects: SampleEffects = {},
+  orbitBus?: OrbitBus
 ): Promise<void> {
-  // Try to load real sample first
-  if (hasSample(sampleName)) {
+  // Check if sample is available in either the legacy cache or Superdough's Dirt-Samples
+  const hasLegacySample = hasSample(sampleName);
+  const hasSuperdoughSample = isSampleCategoryAvailable(sampleName);
+
+  // Try to load real sample first - prioritize legacy cache for existing samples
+  if (hasLegacySample || hasSuperdoughSample) {
     try {
       const sampleBuffer = await getSampleBuffer(sampleName, sampleIndex, offlineCtx);
       if (sampleBuffer) {
@@ -2919,29 +2884,35 @@ async function renderDrumSound(
           gain,
           pan,
           playbackRate,
-          effects
+          effects,
+          orbitBus
         );
         return;
       } else {
-        logger.warn({ sampleName, sampleIndex }, 'Sample buffer returned null, using fallback');
+        logger.debug({ sampleName, sampleIndex }, 'Sample buffer returned null, using fallback');
       }
     } catch (error) {
-      logger.warn({ error, sampleName }, 'Failed to load sample, using synthesized fallback');
+      logger.debug({ error, sampleName }, 'Failed to load sample, using synthesized fallback');
     }
   } else {
-    logger.warn({ sampleName }, 'Sample not in hasSample map, using synth');
+    logger.debug({ sampleName }, 'Sample not available in cache or Superdough, using synth');
   }
 
   // Fallback to synthesized sound
-  // Get sound params from library or use default
+  // Get sound params from library or use gentler default (reduced noise to avoid harsh static)
   const params = soundLibrary[sampleName.toLowerCase()] || {
     freq: 400,
-    freqDecay: 0.02,
+    freqDecay: 0.05,
     noise: true,
-    noiseGain: 0.3,
+    noiseGain: 0.08, // Reduced from 0.3 to avoid harsh static artifacts
+    noiseFilterFreq: 3000, // Added lowpass cutoff to soften the noise
     duration: 0.15,
     waveform: 'triangle' as OscillatorType,
   };
+
+  // Create a mixer gain node to combine oscillator and noise before effects chain
+  const mixerGain = offlineCtx.createGain();
+  mixerGain.gain.value = 1.0;
 
   // Create oscillator for tonal component
   const osc = offlineCtx.createOscillator();
@@ -2959,63 +2930,77 @@ async function renderDrumSound(
   oscGain.gain.setValueAtTime(oscLevel, startTime);
   oscGain.gain.exponentialRampToValueAtTime(0.001, startTime + params.duration);
 
-  // Apply panning
-  const leftGainVal = Math.cos(((pan + 1) * Math.PI) / 4);
-  const rightGainVal = Math.sin(((pan + 1) * Math.PI) / 4);
-
-  const leftPan = offlineCtx.createGain();
-  const rightPan = offlineCtx.createGain();
-  leftPan.gain.value = leftGainVal;
-  rightPan.gain.value = rightGainVal;
-
+  // Connect oscillator to mixer
   osc.connect(oscGain);
-  oscGain.connect(leftPan);
-  oscGain.connect(rightPan);
-  leftPan.connect(destinationL);
-  rightPan.connect(destinationR);
+  oscGain.connect(mixerGain);
 
   osc.start(startTime);
   osc.stop(startTime + params.duration + 0.01);
 
   // Add noise component for snares, hi-hats, etc.
+  // Uses filtered noise to avoid harsh static artifacts
   if (params.noise && params.noiseGain > 0) {
-    // Create noise using a buffer
+    // Create noise using a buffer with slight smoothing
     const noiseLength = Math.ceil(params.duration * offlineCtx.sampleRate);
     const noiseBuffer = offlineCtx.createBuffer(1, noiseLength, offlineCtx.sampleRate);
     const noiseData = noiseBuffer.getChannelData(0);
 
+    // Generate noise with optional simple smoothing for less harsh sound
+    let prevSample = 0;
+    const smoothing = 0.3; // Slight smoothing to reduce harshness
     for (let i = 0; i < noiseLength; i++) {
-      noiseData[i] = Math.random() * 2 - 1;
+      const whiteSample = Math.random() * 2 - 1;
+      // Apply simple one-pole lowpass for pink-ish noise character
+      noiseData[i] = prevSample + smoothing * (whiteSample - prevSample);
+      prevSample = noiseData[i];
     }
 
     const noiseSource = offlineCtx.createBufferSource();
     noiseSource.buffer = noiseBuffer;
 
-    // High-pass filter for noise (makes it more metallic)
-    const noiseFilter = offlineCtx.createBiquadFilter();
-    noiseFilter.type = 'highpass';
-    noiseFilter.frequency.value = params.freq > 1000 ? 5000 : 1000;
+    // High-pass filter for noise (shapes the low end)
+    const noiseHpf = offlineCtx.createBiquadFilter();
+    noiseHpf.type = 'highpass';
+    noiseHpf.frequency.value = params.freq > 1000 ? 5000 : 800;
+    noiseHpf.Q.value = 0.5; // Gentle slope
+
+    // Low-pass filter for noise (removes harsh high frequencies)
+    // This is critical for avoiding harsh static artifacts
+    const noiseLpf = offlineCtx.createBiquadFilter();
+    noiseLpf.type = 'lowpass';
+    // Use noiseFilterFreq if specified, otherwise calculate based on sound type
+    const lpfFreq = params.noiseFilterFreq || (params.freq > 1000 ? 12000 : 6000);
+    noiseLpf.frequency.value = lpfFreq;
+    noiseLpf.Q.value = 0.7; // Slight resonance for character
 
     const noiseGainNode = offlineCtx.createGain();
     const noiseLevel = gain * params.noiseGain;
     noiseGainNode.gain.setValueAtTime(noiseLevel, startTime);
     noiseGainNode.gain.exponentialRampToValueAtTime(0.001, startTime + params.duration);
 
-    const noiseLeftPan = offlineCtx.createGain();
-    const noiseRightPan = offlineCtx.createGain();
-    noiseLeftPan.gain.value = leftGainVal;
-    noiseRightPan.gain.value = rightGainVal;
-
-    noiseSource.connect(noiseFilter);
-    noiseFilter.connect(noiseGainNode);
-    noiseGainNode.connect(noiseLeftPan);
-    noiseGainNode.connect(noiseRightPan);
-    noiseLeftPan.connect(destinationL);
-    noiseRightPan.connect(destinationR);
+    // Connect noise through filters to mixer
+    noiseSource.connect(noiseHpf);
+    noiseHpf.connect(noiseLpf);
+    noiseLpf.connect(noiseGainNode);
+    noiseGainNode.connect(mixerGain);
 
     noiseSource.start(startTime);
     noiseSource.stop(startTime + params.duration + 0.01);
   }
+
+  // Build effect params including pan and any effects from the original value
+  const effectParams: EffectParams = {
+    ...extractEffectParams(effects),
+    pan: (pan + 1) / 2, // Convert from -1..1 to 0..1 range expected by buildEffectsChain
+  };
+
+  // Route through the full effects chain with orbit bus support
+  // This ensures reverb/delay are applied through shared sends as per Superdough architecture
+  const { leftOutput, rightOutput } = buildEffectsChain(offlineCtx, mixerGain, effectParams, orbitBus);
+
+  // Connect stereo outputs to destinations
+  leftOutput.connect(destinationL);
+  rightOutput.connect(destinationR);
 }
 
 /**
@@ -3034,7 +3019,158 @@ function isSampleBasedHap(value: any): string | null {
 }
 
 /**
- * Renders a Strudel pattern to audio using the real Strudel engine and OfflineAudioContext
+ * Extract effects parameters from hap value for Superdough-style rendering
+ * Uses the comprehensive effect extraction from strudel-effects.service.ts
+ */
+function extractSuperdoughEffects(value: any): SampleEffects {
+  // Use the comprehensive effect extraction from the effects service
+  const effectParams = extractEffectParams(value);
+
+  // Apply minimum LPF frequency to prevent muffled sound
+  if (effectParams.lpf !== undefined) {
+    effectParams.lpf = Math.max(1000, effectParams.lpf);
+  }
+
+  // Clamp room and delay values
+  if (effectParams.room !== undefined) {
+    effectParams.room = Math.min(1, Math.max(0, effectParams.room));
+  }
+  if (effectParams.delay !== undefined) {
+    effectParams.delay = Math.min(1, Math.max(0, effectParams.delay));
+  }
+
+  return effectParams as SampleEffects;
+}
+
+/**
+ * Renders a single Superdough-style event to the OfflineAudioContext.
+ *
+ * Superdough's native superdough() function uses a global AudioContext and does not
+ * support OfflineAudioContext for offline exports. Therefore, we use Superdough for:
+ * - Sample loading via loadBuffer() which accepts a custom audio context
+ * - Sample URL resolution from soundMap (Dirt-Samples integration)
+ * - Effect parameter parsing and normalization
+ *
+ * The actual audio rendering is done by our own implementation that replicates
+ * Superdough's audio graph (gain, filters, effects, orbit buses) targeting the
+ * OfflineAudioContext. This ensures offline exports match real-time playback.
+ *
+ * The orbitBus parameter enables shared reverb/delay processing matching Superdough's
+ * orbit-based routing for efficient send effect processing.
+ */
+async function renderSuperdoughEvent(
+  offlineCtx: any,
+  destinationL: any,
+  destinationR: any,
+  value: any,
+  startTime: number,
+  duration: number,
+  orbitBus?: OrbitBus
+): Promise<void> {
+  // Ensure Superdough module is loaded for sample access and effect parsing
+  // Note: Dirt-Samples initialization happens once in renderPatternToAudio before events are processed
+  if (!superdoughModule) {
+    await loadStrudelModules();
+  }
+
+  // Extract parameters from the hap value
+  const sampleName = value?.s || value?.sound;
+  const sampleIndex = typeof value?.n === 'number' ? value.n : 0;
+
+  // Get gain - ensure minimum of 0.3 so sounds are always audible
+  const gain = Math.max(0.3, getGainFromHap(value));
+
+  // Get pan - convert Strudel's 0-1 range to -1 to 1
+  const pan = getPanFromHap(value);
+
+  // Extract effects from value using the comprehensive Superdough effect extraction
+  const effects = extractSuperdoughEffects(value);
+
+  // Try sample playback first - use Superdough's sample loading with our offline context
+  if (sampleName) {
+    // Check both legacy and Superdough sample availability
+    const hasLegacy = hasSample(sampleName);
+    const hasSuperdough = isSampleCategoryAvailable(sampleName);
+
+    if (hasLegacy || hasSuperdough) {
+      try {
+        // getSampleBuffer uses Superdough's loadBuffer internally, which accepts
+        // our offline context for sample decoding
+        const sampleBuffer = await getSampleBuffer(sampleName, sampleIndex, offlineCtx);
+        if (sampleBuffer) {
+          renderSampleBuffer(
+            offlineCtx,
+            destinationL,
+            destinationR,
+            sampleBuffer,
+            startTime,
+            gain,
+            pan,
+            value?.speed ?? 1.0,
+            effects,
+            orbitBus
+          );
+          return;
+        }
+      } catch (error) {
+        logger.debug({ error, sampleName, sampleIndex }, 'Failed to load sample via Superdough');
+      }
+    }
+
+    // Fall back to synthesized drum sound if sample not available
+    await renderDrumSound(
+      offlineCtx,
+      destinationL,
+      destinationR,
+      sampleName,
+      sampleIndex,
+      startTime,
+      gain,
+      pan,
+      value?.speed ?? 1.0,
+      effects,
+      orbitBus
+    );
+    return;
+  }
+
+  // Check for note-based synthesis
+  if (value?.note !== undefined || value?.freq !== undefined) {
+    const frequency = getFrequencyFromHap(value);
+    const waveform = (value?.wave || 'sine') as OscillatorType;
+
+    // Get ADSR if specified
+    const attack = typeof value?.attack === 'number' ? value.attack : 0.01;
+    const decay = typeof value?.decay === 'number' ? value.decay : 0.1;
+    const sustain = typeof value?.sustain === 'number' ? value.sustain : 0.7;
+    const release = typeof value?.release === 'number' ? value.release : 0.1;
+
+    renderSynthNote(
+      offlineCtx,
+      destinationL,
+      destinationR,
+      frequency,
+      startTime,
+      duration,
+      gain,
+      pan,
+      waveform,
+      attack,
+      decay,
+      sustain,
+      release
+    );
+    return;
+  }
+
+  // No recognizable sound source - log and skip
+  logger.debug({ value }, 'Hap value has no recognizable sound source');
+}
+
+/**
+ * Renders a Strudel pattern to audio using the real Strudel engine and OfflineAudioContext.
+ * Uses Superdough for sample loading (via loadBuffer with offline context) and Dirt-Samples
+ * integration, ensuring offline exports match real-time Superdough playback.
  */
 async function renderPatternToAudio(
   pattern: any,
@@ -3044,15 +3180,41 @@ async function renderPatternToAudio(
   cps: number = 0.5,
   onProgress?: (progress: number) => void
 ): Promise<Float32Array> {
-  // Ensure modules are loaded
-  if (!NodeOfflineAudioContext || !strudelCore) {
-    throw new Error('Audio rendering modules not available');
+  // Ensure all modules are loaded including Superdough for sample loading
+  if (!NodeOfflineAudioContext || !strudelCore || !superdoughModule) {
+    const loaded = await loadStrudelModules();
+    if (!loaded || !NodeOfflineAudioContext || !strudelCore) {
+      throw new Error('Audio rendering modules not available');
+    }
+  }
+
+  // Ensure Dirt-Samples are loaded via Superdough before rendering
+  if (!areSamplesLoaded()) {
+    try {
+      await initStrudelSamples();
+      logger.info({ samplesLoaded: areSamplesLoaded() }, 'Dirt-Samples initialized for offline render');
+    } catch (sampleError) {
+      logger.warn({ error: sampleError }, 'Failed to initialize Dirt-Samples, using available samples');
+    }
   }
 
   const totalSamples = Math.ceil(duration * sampleRate);
 
   // Create OfflineAudioContext using web-audio-engine for Node.js
   const offlineCtx = new NodeOfflineAudioContext(channels, totalSamples, sampleRate);
+
+  // Log render configuration
+  // Note: We use Superdough for sample loading (loadBuffer accepts our offline context)
+  // but render audio ourselves since superdough() doesn't support OfflineAudioContext
+  logger.info(
+    {
+      superdoughModuleLoaded: !!superdoughModule,
+      samplesLoaded: areSamplesLoaded(),
+      sampleCategories: getAvailableSampleCategories().length,
+      renderPath: 'superdough-sample-loading',
+    },
+    'Offline render configuration'
+  );
 
   // Create channel merger for stereo rendering
   const merger = offlineCtx.createChannelMerger(2);
@@ -3064,6 +3226,17 @@ async function renderPatternToAudio(
   leftGain.connect(merger, 0, 0);
   rightGain.connect(merger, 0, 1);
   merger.connect(offlineCtx.destination);
+
+  // Create shared orbit buses for reverb and delay effects
+  // This matches Superdough's orbit-based send/return architecture for efficient effect processing
+  const orbitBus = createOrbitBuses(
+    offlineCtx,
+    leftGain,
+    rightGain,
+    4, // Default reverb size
+    0.25, // Default delay time
+    0.3 // Default delay feedback
+  );
 
   // Query the pattern for all events in the duration
   // Strudel patterns work in cycles, so we need to query based on cycles
@@ -3199,7 +3372,7 @@ async function renderPatternToAudio(
   // Track sample usage
   const sampleStats: Record<string, { count: number; loaded: boolean }> = {};
 
-  // Render each hap as audio
+  // Render each hap as audio using Superdough-style event rendering
   const renderedTimes: number[] = [];
   for (const hap of haps) {
     // Only render haps with onsets (to avoid duplicate sounds from continuous patterns)
@@ -3225,104 +3398,34 @@ async function renderPatternToAudio(
     // Track rendered times for debugging
     renderedTimes.push(Math.round(startTime * 1000) / 1000);
 
-    // Get common synthesis parameters
-    // Ensure minimum gain of 0.3 so sounds are always audible
-    const gain = Math.max(0.3, getGainFromHap(value));
-    const pan = getPanFromHap(value);
-
-    // Check if this is a sample-based sound (drums, etc.)
+    // Track sample usage for debugging
     const sampleName = isSampleBasedHap(value);
-
     if (sampleName) {
-      // Track sample usage
       if (!sampleStats[sampleName]) {
-        const isKnown = hasSample(sampleName);
-        sampleStats[sampleName] = { count: 0, loaded: isKnown };
-        if (!isKnown) {
-          logger.warn(
+        const hasLegacy = hasSample(sampleName);
+        const hasSuperdough = isSampleCategoryAvailable(sampleName);
+        sampleStats[sampleName] = { count: 0, loaded: hasLegacy || hasSuperdough };
+        if (!hasLegacy && !hasSuperdough) {
+          logger.debug(
             { sampleName, value: JSON.stringify(value).slice(0, 100) },
-            'Unknown sample name'
+            'Sample not in legacy or Superdough categories'
           );
         }
       }
       sampleStats[sampleName].count++;
-
-      // Get sample index (n parameter in Strudel)
-      const sampleIndex = typeof value?.n === 'number' ? value.n : 0;
-
-      // Calculate playback rate for pitch shifting melodic samples
-      // DISABLED: Pitch shifting was causing issues because samples have unknown base pitches
-      // For now, play all samples at their original pitch
-      // TODO: Re-enable with proper sample base pitch detection
-      const playbackRate = 1.0;
-
-      // Extract effects from hap value
-      const effects: SampleEffects = {};
-      if (typeof value === 'object' && value !== null) {
-        // Low pass filter (lpf or cutoff) - enforce minimum of 1000 Hz to prevent muffled sound
-        const lpfValue =
-          typeof value.lpf === 'number'
-            ? value.lpf
-            : typeof value.cutoff === 'number'
-              ? value.cutoff
-              : undefined;
-        if (lpfValue !== undefined) {
-          effects.lpf = Math.max(1000, lpfValue); // Don't go below 1000 Hz
-        }
-        // High pass filter
-        if (typeof value.hpf === 'number') effects.hpf = value.hpf;
-        // Reverb
-        if (typeof value.room === 'number') effects.room = value.room;
-        // Delay
-        if (typeof value.delay === 'number') effects.delay = value.delay;
-      }
-
-      // Use real samples or synthesizer fallback
-      await renderDrumSound(
-        offlineCtx,
-        leftGain,
-        rightGain,
-        sampleName,
-        sampleIndex,
-        Math.max(0, startTime),
-        gain,
-        pan,
-        playbackRate,
-        effects
-      );
-    } else {
-      // Use melodic synthesizer for note-based sounds
-      const frequency = getFrequencyFromHap(value);
-
-      // Get waveform type if specified
-      let waveform: OscillatorType = 'sine';
-      if (typeof value === 'object' && value !== null) {
-        if (value.wave) waveform = value.wave as OscillatorType;
-      }
-
-      // Get ADSR if specified
-      const attack = typeof value?.attack === 'number' ? value.attack : 0.01;
-      const decay = typeof value?.decay === 'number' ? value.decay : 0.1;
-      const sustain = typeof value?.sustain === 'number' ? value.sustain : 0.7;
-      const release = typeof value?.release === 'number' ? value.release : 0.1;
-
-      // Render the note
-      renderSynthNote(
-        offlineCtx,
-        leftGain,
-        rightGain,
-        frequency,
-        Math.max(0, startTime),
-        Math.min(hapDuration, duration - startTime),
-        gain,
-        pan,
-        waveform,
-        attack,
-        decay,
-        sustain,
-        release
-      );
     }
+
+    // Schedule hap - uses Superdough for sample loading (Dirt-Samples) with our offline context,
+    // and renders audio using our effect chain that replicates Superdough's audio processing
+    await renderSuperdoughEvent(
+      offlineCtx,
+      leftGain,
+      rightGain,
+      value,
+      Math.max(0, startTime),
+      Math.min(hapDuration, duration - startTime),
+      orbitBus
+    );
 
     processedHaps++;
     if (onProgress && processedHaps % 100 === 0) {

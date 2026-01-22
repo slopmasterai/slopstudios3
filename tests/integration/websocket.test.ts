@@ -3,8 +3,10 @@
  */
 
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
+/* eslint-disable import/order */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, jest } from '@jest/globals';
+import jwt from 'jsonwebtoken';
 import { io as ioClient, Socket as ClientSocket } from 'socket.io-client';
 
 import type { Server } from 'http';
@@ -96,12 +98,26 @@ process.env['REDIS_URL'] = 'redis://localhost:6379';
 process.env['JWT_SECRET'] = 'test-jwt-secret-key-that-is-long-enough-32chars';
 process.env['APP_SECRET'] = 'test-app-secret-key-that-is-long-enough-32chars';
 
+// Generate a valid test token
+const TEST_JWT_SECRET = 'test-jwt-secret-key-that-is-long-enough-32chars';
+const generateTestToken = (userId: string = 'test-user-123'): string => {
+  return jwt.sign(
+    { userId, email: 'test@example.com' },
+    TEST_JWT_SECRET,
+    { expiresIn: '1h' }
+  );
+};
+
 describe('WebSocket Server', () => {
   let httpServer: Server;
   let serverUrl: string;
   let clientSocket: ClientSocket;
+  let authToken: string;
 
   beforeAll(async () => {
+    // Generate auth token for tests
+    authToken = generateTestToken();
+
     // Import after mocks are set up
     const { createHttpServer } = await import('../../src/server/http.server.js');
     const { createWebSocketServer } = await import('../../src/server/websocket.server.js');
@@ -140,6 +156,7 @@ describe('WebSocket Server', () => {
     it('should connect to the server', (done) => {
       clientSocket = ioClient(serverUrl, {
         transports: ['websocket'],
+        auth: { token: authToken },
       });
 
       clientSocket.on('connect', () => {
@@ -155,6 +172,7 @@ describe('WebSocket Server', () => {
     it('should receive welcome event on connection', (done) => {
       clientSocket = ioClient(serverUrl, {
         transports: ['websocket'],
+        auth: { token: authToken },
       });
 
       clientSocket.on('welcome', (data) => {
@@ -172,6 +190,7 @@ describe('WebSocket Server', () => {
     it('should disconnect properly', (done) => {
       clientSocket = ioClient(serverUrl, {
         transports: ['websocket'],
+        auth: { token: authToken },
       });
 
       clientSocket.on('connect', () => {
@@ -189,6 +208,7 @@ describe('WebSocket Server', () => {
     it('should respond to ping events', (done) => {
       clientSocket = ioClient(serverUrl, {
         transports: ['websocket'],
+        auth: { token: authToken },
       });
 
       clientSocket.on('connect', () => {
@@ -203,6 +223,7 @@ describe('WebSocket Server', () => {
     it('should respond to heartbeat events', (done) => {
       clientSocket = ioClient(serverUrl, {
         transports: ['websocket'],
+        auth: { token: authToken },
       });
 
       clientSocket.on('connect', () => {
@@ -225,6 +246,7 @@ describe('WebSocket Server', () => {
     it('should join a room', (done) => {
       clientSocket = ioClient(serverUrl, {
         transports: ['websocket'],
+        auth: { token: authToken },
       });
 
       clientSocket.on('connect', () => {
@@ -243,6 +265,7 @@ describe('WebSocket Server', () => {
     it('should leave a room', (done) => {
       clientSocket = ioClient(serverUrl, {
         transports: ['websocket'],
+        auth: { token: authToken },
       });
 
       clientSocket.on('connect', () => {
@@ -265,6 +288,7 @@ describe('WebSocket Server', () => {
     it('should return connection info', (done) => {
       clientSocket = ioClient(serverUrl, {
         transports: ['websocket'],
+        auth: { token: authToken },
       });
 
       clientSocket.on('connect', () => {
@@ -273,7 +297,7 @@ describe('WebSocket Server', () => {
           (info: { socketId: string; connected: boolean; authenticated: boolean }) => {
             expect(info.socketId).toBeDefined();
             expect(info.connected).toBe(true);
-            expect(info.authenticated).toBe(false);
+            expect(info.authenticated).toBe(true); // Now authenticated with JWT token
             done();
           }
         );
@@ -285,6 +309,7 @@ describe('WebSocket Server', () => {
     it('should connect to /media namespace', (done) => {
       clientSocket = ioClient(`${serverUrl}/media`, {
         transports: ['websocket'],
+        auth: { token: authToken },
       });
 
       clientSocket.on('connect', () => {
@@ -300,6 +325,7 @@ describe('WebSocket Server', () => {
     it('should connect to /notifications namespace', (done) => {
       clientSocket = ioClient(`${serverUrl}/notifications`, {
         transports: ['websocket'],
+        auth: { token: authToken },
       });
 
       clientSocket.on('connect', () => {

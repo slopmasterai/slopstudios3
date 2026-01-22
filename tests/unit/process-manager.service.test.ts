@@ -367,14 +367,16 @@ describe('ProcessManagerService', () => {
 
       mockRedis.zrank.mockResolvedValue(2);
 
-      const position = await enqueueProcess({
+      const result = await enqueueProcess({
         processId: 'queue-test-1',
         userId: 'user-1',
         priority: 5,
         enqueuedAt: new Date().toISOString(),
       });
 
-      expect(position).toBe(3); // 0-indexed rank + 1
+      // enqueueProcess returns { position, estimatedWaitSeconds }
+      expect(result.position).toBe(3); // 0-indexed rank + 1
+      expect(result.estimatedWaitSeconds).toBeDefined();
       expect(mockRedis.zadd).toHaveBeenCalled();
     });
 

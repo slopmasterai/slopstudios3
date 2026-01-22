@@ -20,6 +20,7 @@ import {
   Radio,
   Sparkles,
   TrendingUp,
+  ChevronDown,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -415,7 +416,7 @@ interface ImprovementIteration {
 export function Strudel() {
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
   const [showExportOptions, setShowExportOptions] = useState(false);
-  const [showImprovementPanel, setShowImprovementPanel] = useState(false);
+  const [expandedIteration, setExpandedIteration] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Combined music improvement flow: Self-Critique -> Discussion
@@ -533,40 +534,42 @@ export function Strudel() {
     if (!codeValue) return;
 
     console.log('[Improve] Starting combined improvement flow:', codeValue.substring(0, 50));
-    setShowImprovementPanel(true);
 
     // Build the improvement prompt
-    const improvementPrompt = `You are reviewing and improving a Strudel live-coding music pattern.
+    const improvementPrompt = `You are improving a Strudel live-coding music pattern.
 
 CURRENT PATTERN:
 ${codeValue}
 
-Your task is to analyze this pattern and improve it based on the quality criteria provided.
+VALID SYNTAX EXAMPLES (follow these exactly):
+- Simple: s("bd sd hh sd")
+- With modifier: s("bd sd hh sd").gain(0.8)
+- Stacked: stack(s("bd*4"), s("~ sd ~ sd"), s("hh*8"))
+- Sequence: s("bd sd [bd bd] sd")
+- Alternating: s("<bd cp> sd <hh oh> sd")
+- Notes: note("c3 e3 g3 b3").sound("piano")
 
-IMPROVEMENT GUIDELINES:
-1. Fix any syntax errors or invalid sample names
-2. Improve musical structure and coherence
-3. Enhance rhythmic variation while maintaining groove
-4. Add dynamic contrast (gain, filter sweeps)
-5. Improve the overall arrangement and energy arc
+STRICT RULES:
+1. Every opening ( must have a matching closing )
+2. Every opening [ must have a matching closing ]
+3. Every < must have a matching >
+4. Angle brackets < > are ONLY used inside quote strings for alternation
+5. Keep patterns simple - avoid deeply nested structures
+6. Use ONLY these samples: bd, sd, hh, cp, oh, cr, bass, piano, casio, arpy, pluck
 
-CONSTRAINTS - Only use these allowed constructs:
-- s("samplepattern")
-- note("pitchpattern").s("samplename")
-- Modifiers: .gain(x) .lpf(x) .hpf(x) .room(x) .delay(x) .pan(x) .slow(n) .fast(n)
-- Combinators: stack(patt1, patt2, ...) slowcat(patt1, patt2, ...)
+VALID MODIFIERS (chain with dots):
+.gain(0-1) .lpf(100-5000) .room(0-1) .fast(1-4) .slow(1-4)
 
-AVAILABLE SAMPLES ONLY:
-Drums: bd, sd, hh, cp, hh27, cr, perc, tabla, hand, rm
-Drum Machines: 808, 808bd, 808sd, 808hc, 808oh, clubkick
-Bass: bass, bass1, bass2, bass3, jvbass, jungbass
-Melodic: casio, arpy, pluck, sitar, gtr, jazz, pad, superpiano
-Synth: sine, saw, moog, juno, hoover, stab, blip, bleep
-Effects: noise, metal, industrial, glitch, space, wind
-Voice: mouth, numbers, alphabet
-Nature: birds, insect, crow, bubble
+IMPROVEMENT GOALS:
+1. Fix any syntax errors first
+2. Add rhythmic variation
+3. Layer 2-3 elements with stack()
+4. Keep it musically coherent
 
-Output ONLY the improved Strudel code. Do NOT wrap in markdown code blocks. Do NOT use \`\`\` or any formatting. Just output the raw code starting with slowcat( or stack( or s(.`;
+OUTPUT RULES:
+- Output ONLY valid Strudel code
+- NO markdown, NO \`\`\`, NO explanation
+- Start directly with s( or stack( or note(`;
 
     startImprovement(codeValue, improvementPrompt);
   }, [codeValue, startImprovement]);
@@ -784,21 +787,6 @@ Output ONLY the improved Strudel code. Do NOT wrap in markdown code blocks. Do N
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={handleImprove}
-                  disabled={isImproving || !codeValue}
-                  className="flex-1"
-                >
-                  {isImproving ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="mr-2 h-4 w-4" />
-                  )}
-                  Improve
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
                   onClick={() => setShowExportOptions(!showExportOptions)}
                   className="flex-1"
                 >
@@ -815,159 +803,6 @@ Output ONLY the improved Strudel code. Do NOT wrap in markdown code blocks. Do N
               <span className="mx-1">|</span>
               <span>Ctrl+. or Esc: Stop</span>
             </div>
-
-            {/* Improvement Panel */}
-            <Collapsible open={showImprovementPanel} onOpenChange={setShowImprovementPanel}>
-              <CollapsibleContent className="space-y-3">
-                <div className="rounded-lg border p-4 space-y-4 bg-gradient-to-r from-purple-500/5 to-pink-500/5">
-                  {/* Header with title and status */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-purple-500" />
-                      <Label className="text-sm font-medium">AI Song Improvement</Label>
-                    </div>
-                    {isImproving && !isDiscussionRunning && (
-                      <Badge variant="secondary" className="animate-pulse">
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        {improvementPhase === 'critique' ? 'Improving...' : 'Analyzing...'}
-                      </Badge>
-                    )}
-                    {isDiscussionRunning && (
-                      <Badge variant="secondary" className="animate-pulse bg-blue-500/20">
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        Experts Discussing...
-                      </Badge>
-                    )}
-                    {improvementComplete && (
-                      <Badge variant="default" className="bg-green-500">
-                        <CheckCircle className="mr-1 h-3 w-3" />
-                        Complete
-                      </Badge>
-                    )}
-                  </div>
-
-                  {/* Phase Indicator */}
-                  {improvementPhase !== 'idle' && (
-                    <div className="flex items-center gap-2 py-2">
-                      <div className="flex items-center gap-1">
-                        <div
-                          className={`h-2.5 w-2.5 rounded-full transition-colors ${
-                            improvementPhase === 'critique'
-                              ? 'bg-purple-500 animate-pulse'
-                              : isCritiqueCompleted
-                                ? 'bg-green-500'
-                                : 'bg-gray-300 dark:bg-gray-600'
-                          }`}
-                        />
-                        <span className="text-xs text-muted-foreground">Self-Critique</span>
-                      </div>
-                      <div className="h-px flex-1 bg-border" />
-                      <div className="flex items-center gap-1">
-                        <div
-                          className={`h-2.5 w-2.5 rounded-full transition-colors ${
-                            improvementPhase === 'discussion'
-                              ? 'bg-blue-500 animate-pulse'
-                              : isDiscussionCompleted
-                                ? 'bg-green-500'
-                                : 'bg-gray-300 dark:bg-gray-600'
-                          }`}
-                        />
-                        <span className="text-xs text-muted-foreground">Expert Discussion</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {improvementError && (
-                    <Alert variant="destructive">
-                      <AlertDescription>{improvementError}</AlertDescription>
-                    </Alert>
-                  )}
-
-                  {isImproving &&
-                    improvementIterations.length === 0 &&
-                    improvementPhase === 'critique' && (
-                      <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Agent is analyzing your pattern...
-                      </div>
-                    )}
-
-                  {improvementIterations.length > 0 && (
-                    <div className="space-y-3">
-                      <Label className="text-xs text-muted-foreground">
-                        Improvement Iterations ({improvementIterations.length})
-                      </Label>
-                      <div className="space-y-2">
-                        {improvementIterations.map((iter) => (
-                          <div
-                            key={iter.iteration}
-                            className="rounded-md border p-3 space-y-2 hover:bg-accent/50 transition-colors"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="text-xs">
-                                  Iteration {iter.iteration}
-                                </Badge>
-                                <div className="flex items-center gap-1">
-                                  <TrendingUp className="h-3 w-3 text-green-500" />
-                                  <span className="text-xs font-medium">
-                                    Quality: {Math.round(iter.qualityScore * 100)}%
-                                  </span>
-                                </div>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => applyIterationCode(iter.code)}
-                                disabled={!iter.code}
-                              >
-                                Apply
-                              </Button>
-                            </div>
-                            {iter.feedback && (
-                              <p className="text-xs text-muted-foreground line-clamp-2">
-                                {iter.feedback}
-                              </p>
-                            )}
-                            {iter.code && (
-                              <div className="max-h-20 overflow-y-auto rounded bg-muted p-2">
-                                <pre className="text-xs font-mono whitespace-pre-wrap">
-                                  {truncate(iter.code, 200)}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Music Discussion Panel - appears after critique completes */}
-                  <MusicDiscussionPanel
-                    isActive={improvementPhase === 'discussion' || improvementPhase === 'complete'}
-                    isRunning={isDiscussionRunning}
-                    isCompleted={isDiscussionCompleted}
-                    rounds={discussionRounds}
-                    currentRound={currentRound}
-                    currentContributions={currentContributions}
-                    participantCount={participantCount || 4}
-                    consensusScore={consensusScore}
-                    finalConsensus={finalConsensus}
-                    error={discussionError}
-                  />
-
-                  {improvementComplete && improvementIterations.length > 0 && (
-                    <Alert>
-                      <CheckCircle className="h-4 w-4" />
-                      <AlertDescription>
-                        Improvement complete! The best version has been applied to the editor.
-                        {isDiscussionCompleted && ' Music experts have reviewed the improvement.'}
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
 
             {/* Status alerts */}
             {validation && (
@@ -1151,56 +986,255 @@ Output ONLY the improved Strudel code. Do NOT wrap in markdown code blocks. Do N
           </CardContent>
         </Card>
 
-        {/* Output / Detail */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Rendered Output</CardTitle>
-            <CardDescription>
-              {selectedProcessId
-                ? `Process ${selectedProcessId.slice(0, 8)}...`
-                : 'Export a pattern to generate downloadable audio'}
+        {/* AI Song Improvement Panel */}
+        <Card className="lg:row-span-2 flex flex-col">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-purple-500" />
+                <CardTitle className="text-base">AI Song Improvement</CardTitle>
+              </div>
+              {isImproving && !isDiscussionRunning && (
+                <Badge variant="secondary" className="animate-pulse">
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  {improvementPhase === 'critique' ? 'Improving...' : 'Analyzing...'}
+                </Badge>
+              )}
+              {isDiscussionRunning && (
+                <Badge variant="secondary" className="animate-pulse bg-blue-500/20">
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  Experts Discussing...
+                </Badge>
+              )}
+              {improvementComplete && (
+                <Badge variant="default" className="bg-green-500">
+                  <CheckCircle className="mr-1 h-3 w-3" />
+                  Complete
+                </Badge>
+              )}
+            </div>
+            <CardDescription className="text-xs">
+              {improvementPhase === 'idle'
+                ? 'Enhance your pattern with AI-powered improvements'
+                : 'AI agents iteratively improve and evaluate your music'}
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            {selectedProcessId ? (
-              <ProcessDetail processId={selectedProcessId} />
-            ) : (
-              <div className="flex h-48 flex-col items-center justify-center text-muted-foreground gap-2">
-                <FileDown className="h-8 w-8" />
-                <p className="text-center text-sm">
-                  Use "Export WAV" to render patterns
+          <CardContent className="space-y-4 flex-1 overflow-y-auto">
+            {/* Improve Button */}
+            <Button
+              type="button"
+              size="lg"
+              className="w-full"
+              onClick={handleImprove}
+              disabled={isImproving || !codeValue}
+            >
+              {isImproving ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Improving...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-2 h-5 w-5" />
+                  Improve Pattern
+                </>
+              )}
+            </Button>
+            {/* Phase Indicator */}
+            {improvementPhase !== 'idle' && (
+              <div className="flex items-center gap-2 py-2">
+                <div className="flex items-center gap-1">
+                  <div
+                    className={`h-2.5 w-2.5 rounded-full transition-colors ${
+                      improvementPhase === 'critique'
+                        ? 'bg-purple-500 animate-pulse'
+                        : isCritiqueCompleted
+                          ? 'bg-green-500'
+                          : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  />
+                  <span className="text-xs text-muted-foreground">Self-Critique</span>
+                </div>
+                <div className="h-px flex-1 bg-border" />
+                <div className="flex items-center gap-1">
+                  <div
+                    className={`h-2.5 w-2.5 rounded-full transition-colors ${
+                      improvementPhase === 'discussion'
+                        ? 'bg-blue-500 animate-pulse'
+                        : isDiscussionCompleted
+                          ? 'bg-green-500'
+                          : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  />
+                  <span className="text-xs text-muted-foreground">Expert Discussion</span>
+                </div>
+              </div>
+            )}
+
+            {improvementError && (
+              <Alert variant="destructive">
+                <AlertDescription>{improvementError}</AlertDescription>
+              </Alert>
+            )}
+
+            {/* Idle state */}
+            {improvementPhase === 'idle' && (
+              <div className="flex h-24 flex-col items-center justify-center text-muted-foreground gap-2">
+                <Sparkles className="h-6 w-6" />
+                <p className="text-center text-xs">
+                  Write a pattern and click "Improve"
                   <br />
-                  for download as audio files
+                  to enhance it with AI
                 </p>
               </div>
+            )}
+
+            {/* Loading state */}
+            {isImproving && improvementIterations.length === 0 && improvementPhase === 'critique' && (
+              <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Agent is analyzing your pattern...
+              </div>
+            )}
+
+            {/* Improvement Iterations */}
+            {improvementIterations.length > 0 && (
+              <div className="space-y-3">
+                <Label className="text-xs text-muted-foreground">
+                  Improvement Iterations ({improvementIterations.length})
+                </Label>
+                <div className="space-y-2">
+                  {improvementIterations.map((iter) => {
+                    const isExpanded = expandedIteration === iter.iteration;
+                    return (
+                      <div
+                        key={iter.iteration}
+                        className="rounded-md border overflow-hidden transition-colors"
+                      >
+                        {/* Clickable header */}
+                        <div
+                          className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/50"
+                          onClick={() => setExpandedIteration(isExpanded ? null : iter.iteration)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">
+                              Iteration {iter.iteration}
+                            </Badge>
+                            <div className="flex items-center gap-1">
+                              <TrendingUp className="h-3 w-3 text-green-500" />
+                              <span className="text-xs font-medium">
+                                Quality: {Math.round(iter.qualityScore * 100)}%
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                applyIterationCode(iter.code);
+                              }}
+                              disabled={!iter.code}
+                            >
+                              Apply
+                            </Button>
+                            {isExpanded ? (
+                              <X className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Collapsed preview */}
+                        {!isExpanded && iter.feedback && (
+                          <div className="px-3 pb-3 -mt-1">
+                            <p className="text-xs text-muted-foreground line-clamp-1">
+                              {iter.feedback}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Expanded content */}
+                        {isExpanded && (
+                          <div className="px-3 pb-3 space-y-3 border-t bg-accent/20">
+                            {iter.feedback && (
+                              <div className="pt-3">
+                                <Label className="text-xs text-muted-foreground">Feedback</Label>
+                                <p className="text-sm mt-1 whitespace-pre-wrap">{iter.feedback}</p>
+                              </div>
+                            )}
+                            {iter.code && (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Generated Code</Label>
+                                <div className="mt-1 max-h-48 overflow-y-auto rounded bg-muted p-3">
+                                  <pre className="text-xs font-mono whitespace-pre-wrap">
+                                    {iter.code}
+                                  </pre>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Music Discussion Panel - appears after critique completes */}
+            <MusicDiscussionPanel
+              isActive={improvementPhase === 'discussion' || improvementPhase === 'complete'}
+              isRunning={isDiscussionRunning}
+              isCompleted={isDiscussionCompleted}
+              rounds={discussionRounds}
+              currentRound={currentRound}
+              currentContributions={currentContributions}
+              participantCount={participantCount || 4}
+              consensusScore={consensusScore}
+              finalConsensus={finalConsensus}
+              error={discussionError}
+              onApplyCode={applyIterationCode}
+            />
+
+            {improvementComplete && improvementIterations.length > 0 && (
+              <Alert>
+                <CheckCircle className="h-4 w-4" />
+                <AlertDescription>
+                  Improvement complete! The best version has been applied to the editor.
+                  {isDiscussionCompleted && ' Music experts have reviewed the improvement.'}
+                </AlertDescription>
+              </Alert>
             )}
           </CardContent>
         </Card>
 
-        {/* Process List */}
+        {/* Recent Exports */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center justify-between py-3">
             <div>
-              <CardTitle className="text-base">Recent Exports</CardTitle>
+              <CardTitle className="text-sm">Recent Exports</CardTitle>
               <CardDescription className="text-xs">Your rendered audio files</CardDescription>
             </div>
             <Button variant="ghost" size="sm" onClick={() => refetchProcesses()}>
               <RefreshCw className="h-4 w-4" />
             </Button>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             {isProcessesLoading ? (
-              <div className="flex items-center justify-center p-4">
+              <div className="flex items-center justify-center p-3">
                 <Spinner />
               </div>
             ) : processes.length === 0 ? (
-              <div className="p-4 text-center text-muted-foreground text-sm">No exports yet</div>
+              <div className="py-3 text-center text-muted-foreground text-xs">No exports yet</div>
             ) : (
-              <div className="space-y-2 max-h-64 overflow-y-auto">
+              <div className="space-y-1.5 max-h-32 overflow-y-auto">
                 {processes.map((process) => (
                   <div
                     key={process.id}
-                    className={`flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-accent cursor-pointer ${
+                    className={`flex items-center justify-between rounded-md border p-2 transition-colors hover:bg-accent cursor-pointer ${
                       selectedProcessId === process.id ? 'bg-accent' : ''
                     }`}
                     onClick={() => setSelectedProcessId(process.id)}
@@ -1208,24 +1242,22 @@ Output ONLY the improved Strudel code. Do NOT wrap in markdown code blocks. Do N
                     <div className="flex items-center gap-2">
                       {getStatusIcon(process.status)}
                       <div>
-                        <p className="text-xs font-medium font-mono">
-                          {truncate(process.code, 30)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs font-medium font-mono">{truncate(process.code, 25)}</p>
+                        <p className="text-[10px] text-muted-foreground">
                           {formatRelativeTime(process.createdAt)}
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       {process.status === 'running' && (
-                        <Progress value={process.progress} className="h-1.5 w-12" />
+                        <Progress value={process.progress} className="h-1 w-10" />
                       )}
                       {getStatusBadge(process.status)}
                       {process.status === 'running' && (
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-6 w-6"
+                          className="h-5 w-5"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleCancel(process.id);
@@ -1238,6 +1270,32 @@ Output ONLY the improved Strudel code. Do NOT wrap in markdown code blocks. Do N
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Rendered Output */}
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm">Rendered Output</CardTitle>
+            <CardDescription className="text-xs">
+              {selectedProcessId
+                ? `Process ${selectedProcessId.slice(0, 8)}...`
+                : 'Select an export to view details'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {selectedProcessId ? (
+              <div className="max-h-40 overflow-y-auto">
+                <ProcessDetail processId={selectedProcessId} />
+              </div>
+            ) : (
+              <div className="flex h-20 flex-col items-center justify-center text-muted-foreground gap-1">
+                <FileDown className="h-5 w-5" />
+                <p className="text-center text-xs">
+                  Use "Export WAV" to render patterns
+                </p>
               </div>
             )}
           </CardContent>

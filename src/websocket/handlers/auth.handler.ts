@@ -31,6 +31,7 @@ type TypedSocket = Socket<
 
 interface JwtPayload {
   userId?: string;
+  id?: string;
   sub?: string;
   email?: string;
   exp?: number;
@@ -53,7 +54,7 @@ function verifyToken(token: string): {
     }) as JwtPayload;
 
     // Extract userId from standard claims (userId or sub)
-    const userId = decoded.userId || decoded.sub;
+    const userId = decoded.userId || decoded.id || decoded.sub;
     if (!userId) {
       return { valid: false, error: 'Token missing userId or sub claim' };
     }
@@ -66,13 +67,15 @@ function verifyToken(token: string): {
       },
     };
   } catch (error) {
-    if (error instanceof jwt.TokenExpiredError) {
+    // Check error name instead of instanceof for ESM compatibility
+    const errorName = error instanceof Error ? error.name : '';
+    if (errorName === 'TokenExpiredError') {
       return { valid: false, error: 'Token has expired' };
     }
-    if (error instanceof jwt.JsonWebTokenError) {
+    if (errorName === 'JsonWebTokenError') {
       return { valid: false, error: 'Invalid token signature' };
     }
-    if (error instanceof jwt.NotBeforeError) {
+    if (errorName === 'NotBeforeError') {
       return { valid: false, error: 'Token not yet valid' };
     }
     return { valid: false, error: 'Token verification failed' };
@@ -194,22 +197,24 @@ export function registerAuthHandler(socket: TypedSocket): void {
   });
 
   // Auto-authenticate if token was provided in handshake
-  if (socket.data.token) {
+  // Skip if already authenticated by connection middleware
+  if (socket.data.token && !socket.data.authenticated) {
     const verification = verifyToken(socket.data.token);
 
     if (verification.valid && verification.payload) {
+      const userId = verification.payload.userId || verification.payload.id || verification.payload.sub;
       socket.data.authenticated = true;
-      socket.data.userId = verification.payload.userId;
+      socket.data.userId = userId;
 
-      const userRoom = `user:${verification.payload.userId}`;
+      const userRoom = `user:${userId}`;
       void Promise.resolve(socket.join(userRoom)).then(() => {
         logger.info(
-          { socketId: socket.id, requestId, userId: verification.payload!.userId },
+          { socketId: socket.id, requestId, userId },
           'Client auto-authenticated from handshake'
         );
 
         socket.emit('authenticated', {
-          userId: verification.payload!.userId,
+          userId,
           email: verification.payload!.email,
           authenticatedAt: new Date().toISOString(),
         });
@@ -225,6 +230,20 @@ export function registerAuthHandler(socket: TypedSocket): void {
       socket.emit('authError', { message: errorMessage });
       socket.disconnect(true);
     }
+  } else if (socket.data.authenticated && socket.data.userId) {
+    // Already authenticated by middleware, just emit the event
+    const userRoom = `user:${socket.data.userId}`;
+    void Promise.resolve(socket.join(userRoom)).then(() => {
+      logger.info(
+        { socketId: socket.id, requestId, userId: socket.data.userId },
+        'Client auto-authenticated from middleware'
+      );
+
+      socket.emit('authenticated', {
+        userId: socket.data.userId,
+        authenticatedAt: new Date().toISOString(),
+      });
+    });
   }
 }
 

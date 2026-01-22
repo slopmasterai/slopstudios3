@@ -24,6 +24,38 @@ import type {
   StrudelValidateCallback,
   StrudelStatusCallback,
 } from './strudel.types.js';
+import type {
+  AgentWorkflowQueuedPayload,
+  AgentWorkflowStartedPayload,
+  AgentWorkflowStepStartedPayload,
+  AgentWorkflowStepProgressPayload,
+  AgentWorkflowStepCompletedPayload,
+  AgentWorkflowStepFailedPayload,
+  AgentWorkflowCompletedPayload,
+  AgentWorkflowFailedPayload,
+  AgentWorkflowCancelledPayload,
+  AgentErrorPayload,
+  AgentWorkflowExecutePayload,
+  AgentWorkflowStatusPayload,
+  AgentWorkflowCancelPayload,
+  AgentOrchestratePayload,
+  AgentWorkflowExecuteCallback,
+  AgentWorkflowCancelCallback,
+  AgentWorkflowStatusCallback,
+  AgentOrchestrateCallback,
+  AgentCritiqueExecutePayload,
+  AgentCritiqueIterationPayload,
+  AgentCritiqueConvergedPayload,
+  AgentCritiqueCompletedPayload,
+  AgentCritiqueExecuteCallback,
+  AgentDiscussionExecutePayload,
+  AgentDiscussionRoundStartedPayload,
+  AgentDiscussionContributionPayload,
+  AgentDiscussionRoundCompletedPayload,
+  AgentDiscussionConvergedPayload,
+  AgentDiscussionCompletedPayload,
+  AgentDiscussionExecuteCallback,
+} from './agent.types.js';
 
 /**
  * Events sent from server to clients
@@ -66,6 +98,32 @@ export interface ServerToClientEvents {
   'strudel:complete': (data: StrudelCompletePayload) => void;
   'strudel:error': (data: StrudelErrorPayload) => void;
   'strudel:queued': (data: StrudelQueuedPayload) => void;
+
+  // Agent workflow events
+  'agent:workflow:queued': (data: AgentWorkflowQueuedPayload) => void;
+  'agent:workflow:started': (data: AgentWorkflowStartedPayload) => void;
+  'agent:workflow:step:started': (data: AgentWorkflowStepStartedPayload) => void;
+  'agent:workflow:step:progress': (data: AgentWorkflowStepProgressPayload) => void;
+  'agent:workflow:step:completed': (data: AgentWorkflowStepCompletedPayload) => void;
+  'agent:workflow:step:failed': (data: AgentWorkflowStepFailedPayload) => void;
+  'agent:workflow:completed': (data: AgentWorkflowCompletedPayload) => void;
+  'agent:workflow:failed': (data: AgentWorkflowFailedPayload) => void;
+  'agent:workflow:cancelled': (data: AgentWorkflowCancelledPayload) => void;
+  'agent:error': (data: AgentErrorPayload) => void;
+
+  // Agent self-critique events
+  'agent:critique:iteration': (data: AgentCritiqueIterationPayload) => void;
+  'agent:critique:converged': (data: AgentCritiqueConvergedPayload) => void;
+  'agent:critique:completed': (data: AgentCritiqueCompletedPayload) => void;
+  'agent:critique:error': (data: { executionId: string; error: string; timestamp: string }) => void;
+
+  // Agent discussion events
+  'agent:discussion:round-started': (data: AgentDiscussionRoundStartedPayload) => void;
+  'agent:discussion:contribution': (data: AgentDiscussionContributionPayload) => void;
+  'agent:discussion:round-completed': (data: AgentDiscussionRoundCompletedPayload) => void;
+  'agent:discussion:converged': (data: AgentDiscussionConvergedPayload) => void;
+  'agent:discussion:completed': (data: AgentDiscussionCompletedPayload) => void;
+  'agent:discussion:error': (data: { executionId: string; error: string; timestamp: string }) => void;
 }
 
 /**
@@ -114,6 +172,44 @@ export interface ClientToServerEvents {
   'strudel:status': (
     data: string | { processId: string },
     callback?: StrudelStatusCallback
+  ) => void;
+
+  // Agent workflow events
+  'agent:workflow:execute': (
+    data: AgentWorkflowExecutePayload,
+    callback?: AgentWorkflowExecuteCallback
+  ) => void;
+  'agent:workflow:status': (
+    data: AgentWorkflowStatusPayload,
+    callback?: AgentWorkflowStatusCallback
+  ) => void;
+  'agent:workflow:cancel': (
+    data: AgentWorkflowCancelPayload,
+    callback?: AgentWorkflowCancelCallback
+  ) => void;
+  'agent:workflow:pause': (
+    data: AgentWorkflowCancelPayload,
+    callback?: AgentWorkflowCancelCallback
+  ) => void;
+  'agent:workflow:resume': (
+    data: AgentWorkflowCancelPayload,
+    callback?: AgentWorkflowCancelCallback
+  ) => void;
+  'agent:orchestrate': (
+    data: AgentOrchestratePayload,
+    callback?: AgentOrchestrateCallback
+  ) => void;
+
+  // Agent self-critique events
+  'agent:critique:execute': (
+    data: AgentCritiqueExecutePayload,
+    callback?: AgentCritiqueExecuteCallback
+  ) => void;
+
+  // Agent discussion events
+  'agent:discussion:execute': (
+    data: AgentDiscussionExecutePayload,
+    callback?: AgentDiscussionExecuteCallback
   ) => void;
 }
 

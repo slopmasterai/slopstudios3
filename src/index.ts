@@ -4,6 +4,7 @@
  */
 
 import { serverConfig } from './config/server.config.js';
+import { registerAgentRoutes } from './routes/agent.routes.js';
 import { registerAuthRoutes } from './routes/auth.routes.js';
 import { registerClaudeRoutes } from './routes/claude.routes.js';
 import { registerHealthRoutes } from './routes/health.routes.js';
@@ -15,6 +16,15 @@ import {
   getHttpServer,
 } from './server/http.server.js';
 import { createWebSocketServer, closeWebSocketServer } from './server/websocket.server.js';
+import {
+  initializeAgentMetricsService,
+  shutdownAgentMetricsService,
+} from './services/agent-metrics.service.js';
+import {
+  initializeAgentRegistryService,
+  registerBuiltInAgents,
+  shutdownAgentRegistry,
+} from './services/agent-registry.service.js';
 import {
   initializeMetricsService,
   shutdownMetricsService,
@@ -35,6 +45,12 @@ import {
   shutdownStrudelService,
   stopQueueWorker as stopStrudelQueueWorker,
 } from './services/strudel.service.js';
+import { initializeOrchestrationService } from './services/orchestration.service.js';
+import { initializePromptTemplateService } from './services/prompt-template.service.js';
+import {
+  initializeWorkflowEngineService,
+  stopQueueWorker as stopWorkflowQueueWorker,
+} from './services/workflow-engine.service.js';
 import { logger } from './utils/logger.js';
 import { registerAllHandlers } from './websocket/handlers/index.js';
 
@@ -63,6 +79,10 @@ async function shutdown(signal: string): Promise<void> {
     logger.info('Stopping Strudel queue worker...');
     stopStrudelQueueWorker();
 
+    // Stop agent workflow queue worker
+    logger.info('Stopping agent workflow queue worker...');
+    stopWorkflowQueueWorker();
+
     // Terminate all running Claude processes
     logger.info('Terminating Claude processes...');
     const terminated = await terminateAllProcesses();
@@ -80,6 +100,11 @@ async function shutdown(signal: string): Promise<void> {
     logger.info('Shutting down metrics services...');
     await shutdownMetricsService();
     await shutdownStrudelMetricsService();
+    await shutdownAgentMetricsService();
+
+    // Shutdown agent registry
+    logger.info('Shutting down agent registry...');
+    await shutdownAgentRegistry();
 
     // Close WebSocket connections
     logger.info('Closing WebSocket server...');
@@ -170,23 +195,37 @@ async function main(): Promise<void> {
     logger.info('Registering Strudel routes...');
     registerStrudelRoutes(app);
 
-    // 11. Cleanup zombie processes (from previous runs)
+    // 11. Initialize Agent orchestration services
+    logger.info('Initializing Agent orchestration services...');
+    initializeAgentMetricsService();
+    initializeAgentRegistryService();
+    initializePromptTemplateService();
+    initializeOrchestrationService();
+    initializeWorkflowEngineService();
+    await registerBuiltInAgents();
+    logger.info('Agent orchestration services initialized');
+
+    // 12. Register Agent routes
+    logger.info('Registering Agent routes...');
+    registerAgentRoutes(app);
+
+    // 13. Cleanup zombie processes (from previous runs)
     logger.info('Cleaning up zombie processes...');
     const zombiesCleanedUp = await cleanupZombieProcesses();
     if (zombiesCleanedUp > 0) {
       logger.info({ count: zombiesCleanedUp }, 'Cleaned up zombie processes');
     }
 
-    // 12. Start HTTP server
+    // 14. Start HTTP server
     logger.info('Starting HTTP server...');
     await startHttpServer();
 
-    // 13. Create WebSocket server
+    // 15. Create WebSocket server
     logger.info('Creating WebSocket server...');
     const httpServer = getHttpServer().server;
     const io = createWebSocketServer(httpServer);
 
-    // 14. Register WebSocket handlers
+    // 16. Register WebSocket handlers
     logger.info('Registering WebSocket handlers...');
     io.on('connection', (socket) => {
       registerAllHandlers(socket);

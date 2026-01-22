@@ -99,6 +99,7 @@ interface StrudelProcessStatusResponse {
   status: StrudelProcessStatus;
   progress?: number;
   queuePosition?: number;
+  code?: string;
   createdAt?: string;
   startedAt?: string;
   completedAt?: string;
@@ -552,6 +553,7 @@ export function registerStrudelRoutes(app: FastifyInstance): void {
           status: status.status,
           progress: status.progress,
           queuePosition: status.queuePosition,
+          code: state.code,
           createdAt: state.createdAt,
           startedAt: state.startedAt,
           completedAt: state.completedAt,
@@ -888,6 +890,55 @@ export function registerStrudelRoutes(app: FastifyInstance): void {
       }
     }
   );
+
+  /**
+   * GET /api/v1/strudel/presets - Get preset patterns (public)
+   */
+  app.get('/api/v1/strudel/presets', async (request: FastifyRequest, reply: FastifyReply) => {
+    const presets = [
+      {
+        name: 'Basic Beat',
+        code: 's("bd sd bd sd")',
+        description: 'Simple four-on-the-floor kick and snare pattern',
+      },
+      {
+        name: 'House Groove',
+        code: 'stack(\n  s("bd*4"),\n  s("~ cp ~ cp"),\n  s("hh*8")\n).slow(2)',
+        description: 'Classic house music drum pattern with kick, clap, and hi-hats',
+      },
+      {
+        name: 'Ambient Pad',
+        code: 's("pad").note("<c3 eb3 g3 bb3>").room(0.8).delay(0.5).slow(4)',
+        description: 'Atmospheric pad with chord progression and effects',
+      },
+      {
+        name: 'Arpeggiated Synth',
+        code: 's("arpy*4").note("c4 e4 g4 b4").fast(2).room(0.3)',
+        description: 'Fast arpeggiated synth pattern',
+      },
+      {
+        name: 'Bass Line',
+        code: 's("bass").note("<c2 c2 eb2 f2>").lpf(800).slow(2)',
+        description: 'Simple bass line with low-pass filter',
+      },
+      {
+        name: 'Full Track',
+        code: 'stack(\n  s("bd*4"),\n  s("~ sd ~ sd"),\n  s("hh*8").gain(0.6),\n  s("bass").note("<c2 c2 eb2 f2>").slow(2),\n  s("piano").note("<c4 eb4 g4>").slow(4).room(0.5)\n).slow(2)',
+        description: 'Complete track with drums, bass, and piano',
+      },
+    ];
+
+    const response: ApiResponse<typeof presets> = {
+      success: true,
+      data: presets,
+      meta: {
+        timestamp: timestamp(),
+        requestId: request.id,
+      },
+    };
+
+    return await reply.status(200).send(response);
+  });
 
   /**
    * GET /api/v1/strudel/health - Health check (public)

@@ -1,0 +1,3249 @@
+openapi: 3.0.3
+info:
+  title: Slop Studios 3 API
+  description: |
+    AI-powered creative platform API for media generation, agent orchestration, and live coding music.
+
+    ## Features
+
+    - **Authentication**: JWT-based authentication with session management
+    - **Claude Integration**: AI-powered text generation with streaming support
+    - **Strudel Integration**: Live coding music with pattern validation and audio rendering
+    - **Agent Orchestration**: Multi-agent workflows with various orchestration patterns
+    - **Agent Collaboration**: Self-critique and multi-agent discussions
+    - **Real-time Updates**: WebSocket support for streaming responses
+
+    ## Authentication
+
+    All authenticated endpoints require a Bearer token in the Authorization header:
+    ```
+    Authorization: Bearer <jwt_token>
+    ```
+
+    Tokens are obtained via the `/api/v1/auth/login` or `/api/v1/auth/register` endpoints.
+
+    ## Rate Limiting
+
+    API requests are rate-limited. When rate limited, responses include:
+    - `429 Too Many Requests` status code
+    - `Retry-After` header with seconds until retry is allowed
+
+    ## Error Responses
+
+    All error responses follow a consistent format:
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "ERROR_CODE",
+        "message": "Human-readable error message",
+        "category": "validation|authentication|authorization|not_found|conflict|rate_limit|client|external|internal|timeout",
+        "details": {}
+      },
+      "meta": {
+        "timestamp": "2024-01-01T00:00:00.000Z",
+        "requestId": "req_xxx"
+      }
+    }
+    ```
+
+  version: 1.0.0
+  contact:
+    name: Slop Studios
+    url: https://github.com/slopstudios/slopstudios3
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+  - url: https://api.slopstudios.com
+    description: Production server
+
+tags:
+  - name: Health
+    description: Health check and system status endpoints
+  - name: Authentication
+    description: User authentication and session management
+  - name: Claude
+    description: Claude AI integration for text generation
+  - name: Strudel
+    description: Live coding music with Strudel patterns
+  - name: Agents
+    description: Agent registry and management
+  - name: Templates
+    description: Prompt template management
+  - name: Workflows
+    description: Workflow execution and management
+  - name: Orchestration
+    description: Agent orchestration patterns
+  - name: Collaboration
+    description: Self-critique and discussion patterns
+
+paths:
+  # ===========================================================================
+  # Health Endpoints
+  # ===========================================================================
+  /api/v1/health:
+    get:
+      tags: [Health]
+      summary: System health check
+      description: Returns the overall health status of the system including all components.
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: System is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/health/live:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: Simple liveness check for container orchestration.
+      operationId: getLiveness
+      security: []
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: Checks if the service is ready to accept traffic.
+      operationId: getReadiness
+      security: []
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/health/redis:
+    get:
+      tags: [Health]
+      summary: Redis health check
+      description: Returns detailed Redis connection status and latency.
+      operationId: getRedisHealth
+      security: []
+      responses:
+        '200':
+          description: Redis is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedisHealthResponse'
+        '503':
+          description: Redis is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedisHealthResponse'
+
+  /api/v1/health/metrics:
+    get:
+      tags: [Health]
+      summary: Performance metrics
+      description: Returns detailed performance metrics including memory usage, error rates, and circuit breaker status.
+      operationId: getPerformanceMetrics
+      security: []
+      responses:
+        '200':
+          description: Metrics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceMetricsResponse'
+
+  /api/v1/health/agent:
+    get:
+      tags: [Health]
+      summary: Agent system health
+      description: Returns aggregated health status of agent registry, workflow engine, and template service.
+      operationId: getAgentHealth
+      security: []
+      responses:
+        '200':
+          description: Agent system is healthy or degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHealthDetailResponse'
+        '503':
+          description: Agent system is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHealthDetailResponse'
+
+  # ===========================================================================
+  # Authentication Endpoints
+  # ===========================================================================
+  /api/v1/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register new user
+      description: Creates a new user account and returns an authentication token.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: User already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: User login
+      description: Authenticates a user and returns a JWT token.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: User logout
+      description: Logs out the current user. JWT tokens are stateless, so this is primarily for client-side cleanup.
+      operationId: logout
+      security: []
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get current user
+      description: Returns the profile of the currently authenticated user.
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh token
+      description: Refreshes the JWT token using the current valid token.
+      operationId: refreshToken
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ===========================================================================
+  # Claude Integration Endpoints
+  # ===========================================================================
+  /api/v1/claude/health:
+    get:
+      tags: [Claude]
+      summary: Claude service health
+      description: Checks the health of the Claude integration including CLI availability.
+      operationId: getClaudeHealth
+      security: []
+      responses:
+        '200':
+          description: Claude service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeHealthResponse'
+        '503':
+          description: Claude service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeHealthResponse'
+
+  /api/v1/claude/execute:
+    post:
+      tags: [Claude]
+      summary: Execute Claude prompt
+      description: Executes a prompt using Claude CLI or API fallback. Returns synchronously when complete or 202 if queued.
+      operationId: executeClaudePrompt
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaudeExecuteRequest'
+      responses:
+        '200':
+          description: Execution completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeExecuteResponse'
+        '202':
+          description: Execution queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeQueuedResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Claude service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/claude/execute/async:
+    post:
+      tags: [Claude]
+      summary: Execute Claude prompt asynchronously
+      description: Executes a prompt using Claude CLI or API fallback. Returns immediately with process ID (fire-and-forget pattern).
+      operationId: executeClaudePromptAsync
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaudeExecuteRequest'
+      responses:
+        '202':
+          description: Execution started or queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeQueuedResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Claude service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/claude/processes:
+    get:
+      tags: [Claude]
+      summary: List user processes
+      description: Returns a paginated list of Claude processes for the current user.
+      operationId: listClaudeProcesses
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, queued, running, completed, failed, timeout, cancelled]
+      responses:
+        '200':
+          description: Processes retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeProcessListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/claude/processes/{processId}:
+    get:
+      tags: [Claude]
+      summary: Get process status
+      description: Gets the status of a running or completed Claude process.
+      operationId: getClaudeProcess
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: processId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Process status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeProcessResponse'
+        '404':
+          description: Process not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Claude]
+      summary: Cancel process
+      description: Cancels a running Claude process.
+      operationId: cancelClaudeProcess
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: processId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Process cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: Process not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/claude/metrics:
+    get:
+      tags: [Claude]
+      summary: Get Claude metrics
+      description: Returns usage metrics for the Claude integration.
+      operationId: getClaudeMetrics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Metrics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeMetricsResponse'
+
+  # ===========================================================================
+  # Strudel Integration Endpoints
+  # ===========================================================================
+  /api/v1/strudel/health:
+    get:
+      tags: [Strudel]
+      summary: Strudel service health
+      description: Checks the health of the Strudel live coding integration.
+      operationId: getStrudelHealth
+      security: []
+      responses:
+        '200':
+          description: Strudel service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrudelHealthResponse'
+
+  /api/v1/strudel/validate:
+    post:
+      tags: [Strudel]
+      summary: Validate pattern
+      description: Validates a Strudel pattern for syntax errors.
+      operationId: validateStrudelPattern
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrudelValidateRequest'
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrudelValidateResponse'
+
+  /api/v1/strudel/execute:
+    post:
+      tags: [Strudel]
+      summary: Execute pattern
+      description: Executes a Strudel pattern and renders audio. Returns synchronously when complete or 202 if queued.
+      operationId: executeStrudelPattern
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrudelExecuteRequest'
+      responses:
+        '200':
+          description: Execution completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrudelExecuteResponse'
+        '202':
+          description: Execution queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrudelQueuedResponse'
+        '400':
+          description: Invalid pattern
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/strudel/execute/async:
+    post:
+      tags: [Strudel]
+      summary: Execute pattern asynchronously
+      description: Executes a Strudel pattern and renders audio. Returns immediately with process ID (fire-and-forget pattern).
+      operationId: executeStrudelPatternAsync
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrudelExecuteRequest'
+      responses:
+        '202':
+          description: Execution started or queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrudelQueuedResponse'
+        '400':
+          description: Invalid pattern
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/strudel/processes:
+    get:
+      tags: [Strudel]
+      summary: List user processes
+      description: Returns a paginated list of Strudel processes for the current user.
+      operationId: listStrudelProcesses
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, queued, validating, rendering, complete, failed, cancelled]
+      responses:
+        '200':
+          description: Processes retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrudelProcessListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/strudel/processes/{processId}:
+    get:
+      tags: [Strudel]
+      summary: Get process status
+      description: Gets the status of a running or completed Strudel process.
+      operationId: getStrudelProcess
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: processId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Process status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrudelProcessStatusResponse'
+        '403':
+          description: Access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Process not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Strudel]
+      summary: Cancel process
+      description: Cancels a running Strudel process.
+      operationId: cancelStrudelProcess
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: processId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Process cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Process already completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Process not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/strudel/metrics:
+    get:
+      tags: [Strudel]
+      summary: Get Strudel metrics
+      description: Returns usage metrics for the Strudel integration.
+      operationId: getStrudelMetrics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Metrics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrudelMetricsResponse'
+
+  # ===========================================================================
+  # Agent Registry Endpoints
+  # ===========================================================================
+  /api/v1/agents/registry:
+    get:
+      tags: [Agents]
+      summary: List agents
+      description: Returns all registered agents.
+      operationId: listAgents
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Agents retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentListResponse'
+
+    post:
+      tags: [Agents]
+      summary: Register agent
+      description: Registers a new custom agent.
+      operationId: registerAgent
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterAgentRequest'
+      responses:
+        '201':
+          description: Agent registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/registry/{agentId}:
+    get:
+      tags: [Agents]
+      summary: Get agent
+      description: Returns details for a specific agent.
+      operationId: getAgent
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Agents]
+      summary: Unregister agent
+      description: Unregisters a custom agent.
+      operationId: unregisterAgent
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent unregistered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '403':
+          description: Cannot unregister built-in agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/registry/{agentId}/execute:
+    post:
+      tags: [Agents]
+      summary: Execute agent
+      description: Executes an agent with the given prompt.
+      operationId: executeAgent
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteAgentRequest'
+      responses:
+        '200':
+          description: Execution completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentExecutionResponse'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/registry/{agentId}/health:
+    get:
+      tags: [Agents]
+      summary: Agent health
+      description: Returns the health status of a specific agent.
+      operationId: getRegisteredAgentHealth
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHealthResponse'
+        '503':
+          description: Agent is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHealthResponse'
+
+  # ===========================================================================
+  # Prompt Template Endpoints
+  # ===========================================================================
+  /api/v1/agents/templates:
+    get:
+      tags: [Templates]
+      summary: List templates
+      description: Returns prompt templates with optional filtering.
+      operationId: listTemplates
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [system, user, workflow, helper]
+        - name: tags
+          in: query
+          schema:
+            type: string
+          description: Comma-separated list of tags
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Templates retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateListResponse'
+
+    post:
+      tags: [Templates]
+      summary: Create template
+      description: Creates a new prompt template.
+      operationId: createTemplate
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateRequest'
+      responses:
+        '201':
+          description: Template created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/templates/{templateId}:
+    get:
+      tags: [Templates]
+      summary: Get template
+      description: Returns a specific prompt template.
+      operationId: getTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Template retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateResponse'
+        '404':
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      tags: [Templates]
+      summary: Update template
+      description: Updates an existing prompt template.
+      operationId: updateTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTemplateRequest'
+      responses:
+        '200':
+          description: Template updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateResponse'
+        '404':
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Templates]
+      summary: Delete template
+      description: Deletes a prompt template.
+      operationId: deleteTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Template deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/templates/{templateId}/interpolate:
+    post:
+      tags: [Templates]
+      summary: Interpolate template
+      description: Tests template interpolation with given variables.
+      operationId: interpolateTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterpolateRequest'
+      responses:
+        '200':
+          description: Interpolation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterpolateResponse'
+        '400':
+          description: Interpolation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/templates/{templateId}/versions:
+    get:
+      tags: [Templates]
+      summary: Get template versions
+      description: Returns version history for a template.
+      operationId: getTemplateVersions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Versions retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersionsResponse'
+
+  # ===========================================================================
+  # Workflow Endpoints
+  # ===========================================================================
+  /api/v1/agents/workflows:
+    get:
+      tags: [Workflows]
+      summary: List workflows
+      description: Returns workflows for the current user.
+      operationId: listWorkflows
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, queued, running, paused, completed, failed, cancelled]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Workflows retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowListResponse'
+
+    post:
+      tags: [Workflows]
+      summary: Execute workflow
+      description: Creates and executes a new workflow.
+      operationId: executeWorkflow
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteWorkflowRequest'
+      responses:
+        '201':
+          description: Workflow started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+        '202':
+          description: Workflow queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+        '400':
+          description: Invalid workflow definition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/workflows/{workflowId}:
+    get:
+      tags: [Workflows]
+      summary: Get workflow status
+      description: Returns the current status of a workflow.
+      operationId: getWorkflow
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+        '403':
+          description: Access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workflow not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Workflows]
+      summary: Cancel workflow
+      description: Cancels a running or queued workflow.
+      operationId: cancelWorkflow
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Cannot cancel workflow
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workflow not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/workflows/{workflowId}/pause:
+    post:
+      tags: [Workflows]
+      summary: Pause workflow
+      description: Pauses a running workflow.
+      operationId: pauseWorkflow
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Cannot pause workflow
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/workflows/{workflowId}/resume:
+    post:
+      tags: [Workflows]
+      summary: Resume workflow
+      description: Resumes a paused workflow.
+      operationId: resumeWorkflow
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow resumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Cannot resume workflow
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ===========================================================================
+  # Orchestration Endpoints
+  # ===========================================================================
+  /api/v1/agents/orchestrate:
+    post:
+      tags: [Orchestration]
+      summary: Orchestrate agents
+      description: Executes agents using the specified orchestration pattern.
+      operationId: orchestrate
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestrateRequest'
+      responses:
+        '200':
+          description: Orchestration completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationResponse'
+        '500':
+          description: Orchestration failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/orchestrate/sequential:
+    post:
+      tags: [Orchestration]
+      summary: Sequential orchestration
+      description: Executes agents in sequence, passing output to the next agent.
+      operationId: orchestrateSequential
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestrateRequest'
+      responses:
+        '200':
+          description: Orchestration completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationResponse'
+
+  /api/v1/agents/orchestrate/parallel:
+    post:
+      tags: [Orchestration]
+      summary: Parallel orchestration
+      description: Executes multiple agents in parallel.
+      operationId: orchestrateParallel
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestrateRequest'
+      responses:
+        '200':
+          description: Orchestration completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationResponse'
+
+  /api/v1/agents/orchestrate/metrics:
+    get:
+      tags: [Orchestration]
+      summary: Get orchestration metrics
+      description: Returns metrics for orchestration operations.
+      operationId: getOrchestrationMetrics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Metrics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationMetricsResponse'
+
+  # ===========================================================================
+  # Collaboration Endpoints
+  # ===========================================================================
+  /api/v1/agents/orchestrate/self-critique:
+    post:
+      tags: [Collaboration]
+      summary: Self-critique
+      description: Executes iterative self-critique pattern for quality improvement.
+      operationId: selfCritique
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelfCritiqueRequest'
+      responses:
+        '200':
+          description: Self-critique completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelfCritiqueResponse'
+        '500':
+          description: Self-critique failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/critique/{critiqueId}:
+    get:
+      tags: [Collaboration]
+      summary: Get critique result
+      description: Returns a stored critique result.
+      operationId: getCritiqueResult
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: critiqueId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Critique result retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelfCritiqueResponse'
+        '404':
+          description: Critique not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/critique/metrics:
+    get:
+      tags: [Collaboration]
+      summary: Get critique metrics
+      description: Returns metrics for self-critique operations.
+      operationId: getCritiqueMetrics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Metrics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CritiqueMetricsResponse'
+
+  /api/v1/agents/orchestrate/discussion:
+    post:
+      tags: [Collaboration]
+      summary: Multi-agent discussion
+      description: Executes a multi-agent discussion to reach consensus.
+      operationId: discussion
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscussionRequest'
+      responses:
+        '200':
+          description: Discussion completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscussionResponse'
+        '500':
+          description: Discussion failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/discussion/{discussionId}:
+    get:
+      tags: [Collaboration]
+      summary: Get discussion result
+      description: Returns a stored discussion result.
+      operationId: getDiscussionResult
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: discussionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Discussion result retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscussionResponse'
+        '404':
+          description: Discussion not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/agents/discussion/metrics:
+    get:
+      tags: [Collaboration]
+      summary: Get discussion metrics
+      description: Returns metrics for discussion operations.
+      operationId: getDiscussionMetrics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Metrics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscussionMetricsResponse'
+
+  # ===========================================================================
+  # Agent System Health & Metrics
+  # ===========================================================================
+  /api/v1/agents/health:
+    get:
+      tags: [Agents]
+      summary: Agent system health
+      description: Returns overall health of the agent orchestration system.
+      operationId: getAgentSystemHealth
+      security: []
+      responses:
+        '200':
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSystemHealthResponse'
+        '503':
+          description: System is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSystemHealthResponse'
+
+  /api/v1/agents/metrics:
+    get:
+      tags: [Agents]
+      summary: Get agent metrics
+      description: Returns comprehensive metrics for the agent system.
+      operationId: getAgentMetrics
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: includeRecent
+          in: query
+          schema:
+            type: boolean
+            default: true
+        - name: periodSeconds
+          in: query
+          schema:
+            type: integer
+            minimum: 60
+            maximum: 86400
+            default: 3600
+      responses:
+        '200':
+          description: Metrics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentMetricsResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from login or register endpoint
+
+  schemas:
+    # =========================================================================
+    # Common Schemas
+    # =========================================================================
+    ApiResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    ResponseMeta:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Error code for programmatic handling
+            message:
+              type: string
+              description: Human-readable error message
+            category:
+              type: string
+              enum: [validation, authentication, authorization, not_found, conflict, rate_limit, client, external, internal, timeout]
+            details:
+              type: object
+              additionalProperties: true
+            retryAfter:
+              type: integer
+              description: Seconds until retry is allowed (for rate limits)
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    # =========================================================================
+    # Health Schemas
+    # =========================================================================
+    HealthResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [healthy, degraded, unhealthy]
+            version:
+              type: string
+            uptime:
+              type: integer
+            timestamp:
+              type: string
+              format: date-time
+            components:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  latencyMs:
+                    type: integer
+
+    ReadinessResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [healthy, degraded, unhealthy]
+            version:
+              type: string
+            uptime:
+              type: integer
+            nodeVersion:
+              type: string
+            environment:
+              type: string
+            memory:
+              type: object
+              properties:
+                heapUsedMB:
+                  type: number
+                heapTotalMB:
+                  type: number
+                heapUsedPercent:
+                  type: number
+                rssMB:
+                  type: number
+                externalMB:
+                  type: number
+            performance:
+              type: object
+              properties:
+                errorRates:
+                  type: object
+                  additionalProperties:
+                    type: number
+                circuitBreakers:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    properties:
+                      state:
+                        type: string
+                      failures:
+                        type: integer
+                      successes:
+                        type: integer
+            dependencies:
+              type: object
+              properties:
+                redis:
+                  type: object
+                  properties:
+                    status:
+                      type: string
+                      enum: [up, down]
+                    latency:
+                      type: integer
+                    error:
+                      type: string
+                database:
+                  type: object
+                  properties:
+                    status:
+                      type: string
+                      enum: [up, down, not_configured]
+                    latency:
+                      type: integer
+                    error:
+                      type: string
+                agentSystem:
+                  type: object
+                  additionalProperties: true
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    RedisHealthResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            connected:
+              type: boolean
+            healthy:
+              type: boolean
+            latency:
+              type: integer
+            error:
+              type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    PerformanceMetricsResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            memory:
+              type: object
+              properties:
+                heapUsedMB:
+                  type: number
+                heapTotalMB:
+                  type: number
+                heapUsedPercent:
+                  type: number
+                rssMB:
+                  type: number
+                externalMB:
+                  type: number
+                arrayBuffersMB:
+                  type: number
+                nodeHeapSizeLimit:
+                  type: integer
+            errorRates:
+              type: object
+              additionalProperties:
+                type: number
+            circuitBreakers:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  state:
+                    type: string
+                  failures:
+                    type: integer
+                  successes:
+                    type: integer
+            process:
+              type: object
+              properties:
+                pid:
+                  type: integer
+                uptime:
+                  type: integer
+                cpuUsage:
+                  type: object
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    AgentHealthDetailResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [healthy, degraded, unhealthy]
+            issues:
+              type: array
+              items:
+                type: string
+            registry:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [up, down]
+                totalAgents:
+                  type: integer
+                byType:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                byStatus:
+                  type: object
+                  additionalProperties:
+                    type: integer
+            workflowEngine:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [up, down]
+                activeWorkflows:
+                  type: integer
+                queuedWorkflows:
+                  type: integer
+                maxConcurrent:
+                  type: integer
+                queueUtilization:
+                  type: integer
+            templateService:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [up, down]
+                available:
+                  type: boolean
+                templateCount:
+                  type: integer
+                error:
+                  type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    # =========================================================================
+    # Auth Schemas
+    # =========================================================================
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+          maxLength: 100
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            user:
+              $ref: '#/components/schemas/User'
+            token:
+              type: string
+            expiresIn:
+              type: integer
+
+    UserResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/User'
+
+    TokenResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            token:
+              type: string
+            expiresIn:
+              type: integer
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # =========================================================================
+    # Claude Schemas
+    # =========================================================================
+    ClaudeHealthResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            healthy:
+              type: boolean
+            cliAvailable:
+              type: boolean
+            apiAvailable:
+              type: boolean
+            activeProcesses:
+              type: integer
+            queuedRequests:
+              type: integer
+
+    ClaudeExecuteRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          maxLength: 100000
+        options:
+          type: object
+          properties:
+            timeoutMs:
+              type: integer
+              minimum: 1000
+              maximum: 600000
+            streaming:
+              type: boolean
+              default: false
+            model:
+              type: string
+
+    ClaudeExecuteResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            processId:
+              type: string
+            output:
+              type: string
+            status:
+              type: string
+              enum: [completed, failed, cancelled]
+            durationMs:
+              type: integer
+
+    ClaudeQueuedResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            processId:
+              type: string
+            status:
+              type: string
+              enum: [queued]
+            queuePosition:
+              type: integer
+
+    ClaudeProcessResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            processId:
+              type: string
+            status:
+              type: string
+              enum: [queued, running, completed, failed, cancelled]
+            output:
+              type: string
+            error:
+              type: string
+            durationMs:
+              type: integer
+
+    ClaudeMetricsResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            totalRequests:
+              type: integer
+            activeProcesses:
+              type: integer
+            queuedRequests:
+              type: integer
+            avgDurationMs:
+              type: number
+            successRate:
+              type: number
+
+    ClaudeProcessListResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            processes:
+              type: array
+              items:
+                type: object
+                properties:
+                  processId:
+                    type: string
+                  status:
+                    type: string
+                    enum: [pending, queued, running, completed, failed, timeout, cancelled]
+                  queuePosition:
+                    type: integer
+                  createdAt:
+                    type: string
+                    format: date-time
+                  startedAt:
+                    type: string
+                    format: date-time
+                  completedAt:
+                    type: string
+                    format: date-time
+                  durationMs:
+                    type: integer
+                  result:
+                    type: object
+                    additionalProperties: true
+            total:
+              type: integer
+            pagination:
+              type: object
+              properties:
+                page:
+                  type: integer
+                pageSize:
+                  type: integer
+                totalPages:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    # =========================================================================
+    # Strudel Schemas
+    # =========================================================================
+    StrudelHealthResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            healthy:
+              type: boolean
+            activeRenders:
+              type: integer
+            queuedRenders:
+              type: integer
+
+    StrudelValidateRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          maxLength: 100000
+
+    StrudelValidateResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            valid:
+              type: boolean
+            errors:
+              type: array
+              items:
+                type: object
+                properties:
+                  line:
+                    type: integer
+                  column:
+                    type: integer
+                  message:
+                    type: string
+
+    StrudelExecuteRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          maxLength: 100000
+        options:
+          type: object
+          properties:
+            duration:
+              type: number
+              minimum: 1
+              maximum: 600
+              default: 10
+            sampleRate:
+              type: integer
+              default: 44100
+            format:
+              type: string
+              enum: [wav]
+              default: wav
+
+    StrudelExecuteResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            jobId:
+              type: string
+            status:
+              type: string
+              enum: [completed, failed]
+            audioUrl:
+              type: string
+            durationMs:
+              type: integer
+
+    StrudelMetricsResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            totalRenders:
+              type: integer
+            activeRenders:
+              type: integer
+            queuedRenders:
+              type: integer
+            avgDurationMs:
+              type: number
+            successRate:
+              type: number
+
+    StrudelQueuedResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            processId:
+              type: string
+            status:
+              type: string
+              enum: [pending, queued, validating, rendering]
+            queuePosition:
+              type: integer
+            message:
+              type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    StrudelProcessListResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            processes:
+              type: array
+              items:
+                type: object
+                properties:
+                  processId:
+                    type: string
+                  status:
+                    type: string
+                    enum: [pending, queued, validating, rendering, complete, failed, cancelled]
+                  progress:
+                    type: number
+                  queuePosition:
+                    type: integer
+                  createdAt:
+                    type: string
+                    format: date-time
+                  startedAt:
+                    type: string
+                    format: date-time
+                  completedAt:
+                    type: string
+                    format: date-time
+            total:
+              type: integer
+            pagination:
+              type: object
+              properties:
+                page:
+                  type: integer
+                pageSize:
+                  type: integer
+                totalPages:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    StrudelProcessStatusResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            processId:
+              type: string
+            status:
+              type: string
+              enum: [pending, queued, validating, rendering, complete, failed, cancelled]
+            progress:
+              type: number
+            queuePosition:
+              type: integer
+            code:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+            startedAt:
+              type: string
+              format: date-time
+            completedAt:
+              type: string
+              format: date-time
+            result:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                status:
+                  type: string
+                audioUrl:
+                  type: string
+                validation:
+                  type: object
+                error:
+                  type: object
+                durationMs:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    # =========================================================================
+    # Agent Schemas
+    # =========================================================================
+    AgentListResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Agent'
+
+    AgentResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Agent'
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [claude, strudel, custom]
+        name:
+          type: string
+        description:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+        status:
+          type: string
+          enum: [idle, busy, error, offline]
+        createdAt:
+          type: string
+          format: date-time
+
+    RegisterAgentRequest:
+      type: object
+      required: [type, name, capabilities]
+      properties:
+        type:
+          type: string
+          enum: [claude, strudel, custom]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 1000
+        capabilities:
+          type: array
+          items:
+            type: object
+            required: [name, description]
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+        config:
+          type: object
+          additionalProperties: true
+
+    ExecuteAgentRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          maxLength: 100000
+        context:
+          type: object
+          additionalProperties: true
+        config:
+          type: object
+          additionalProperties: true
+        timeoutMs:
+          type: integer
+          minimum: 1000
+          maximum: 600000
+
+    AgentExecutionResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            success:
+              type: boolean
+            output:
+              type: string
+            error:
+              type: string
+            durationMs:
+              type: integer
+
+    AgentHealthResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            agentId:
+              type: string
+            healthy:
+              type: boolean
+            status:
+              type: string
+              enum: [idle, busy, error, offline]
+            message:
+              type: string
+            lastCheck:
+              type: string
+              format: date-time
+
+    AgentSystemHealthResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            healthy:
+              type: boolean
+            services:
+              type: object
+              properties:
+                promptTemplates:
+                  type: boolean
+                agentRegistry:
+                  type: boolean
+                workflowEngine:
+                  type: boolean
+                orchestration:
+                  type: boolean
+            agents:
+              type: object
+              properties:
+                total:
+                  type: integer
+                healthy:
+                  type: integer
+                degraded:
+                  type: integer
+                offline:
+                  type: integer
+            workflows:
+              type: object
+              properties:
+                active:
+                  type: integer
+                queued:
+                  type: integer
+                maxConcurrent:
+                  type: integer
+            uptimeSeconds:
+              type: integer
+            timestamp:
+              type: string
+              format: date-time
+
+    AgentMetricsResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          additionalProperties: true
+
+    # =========================================================================
+    # Template Schemas
+    # =========================================================================
+    TemplateListResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            templates:
+              type: array
+              items:
+                $ref: '#/components/schemas/Template'
+            total:
+              type: integer
+            page:
+              type: integer
+            pageSize:
+              type: integer
+
+    TemplateResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Template'
+
+    Template:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        content:
+          type: string
+        variables:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+                enum: [string, number, boolean, array, object]
+              required:
+                type: boolean
+              default: {}
+              description:
+                type: string
+        category:
+          type: string
+          enum: [system, user, workflow, helper]
+        tags:
+          type: array
+          items:
+            type: string
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateTemplateRequest:
+      type: object
+      required: [name, content, variables, category]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 1000
+        content:
+          type: string
+          minLength: 1
+          maxLength: 100000
+        variables:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [name, type, required]
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+                enum: [string, number, boolean, array, object]
+              required:
+                type: boolean
+              default: {}
+              description:
+                type: string
+        category:
+          type: string
+          enum: [system, user, workflow, helper]
+        tags:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+
+    UpdateTemplateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 1000
+        content:
+          type: string
+          minLength: 1
+          maxLength: 100000
+        variables:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+        category:
+          type: string
+          enum: [system, user, workflow, helper]
+        tags:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+        changeDescription:
+          type: string
+          maxLength: 500
+
+    InterpolateRequest:
+      type: object
+      required: [variables]
+      properties:
+        variables:
+          type: object
+          additionalProperties: true
+
+    InterpolateResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            success:
+              type: boolean
+            result:
+              type: string
+            error:
+              type: string
+
+    TemplateVersionsResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              version:
+                type: integer
+              content:
+                type: string
+              changeDescription:
+                type: string
+              createdAt:
+                type: string
+                format: date-time
+              createdBy:
+                type: string
+
+    # =========================================================================
+    # Workflow Schemas
+    # =========================================================================
+    WorkflowListResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            workflows:
+              type: array
+              items:
+                $ref: '#/components/schemas/Workflow'
+            total:
+              type: integer
+            page:
+              type: integer
+            pageSize:
+              type: integer
+
+    WorkflowResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Workflow'
+
+    Workflow:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [pending, queued, running, paused, completed, failed, cancelled]
+        definition:
+          type: object
+        context:
+          type: object
+        stepResults:
+          type: array
+          items:
+            type: object
+        progress:
+          type: number
+          minimum: 0
+          maximum: 100
+        error:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    ExecuteWorkflowRequest:
+      type: object
+      properties:
+        workflow:
+          type: object
+          required: [id, name, steps, metadata]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            description:
+              type: string
+            steps:
+              type: array
+              minItems: 1
+              maxItems: 50
+              items:
+                type: object
+            timeoutMs:
+              type: integer
+            metadata:
+              type: object
+        workflowId:
+          type: string
+        context:
+          type: object
+          additionalProperties: true
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 100
+
+    # =========================================================================
+    # Orchestration Schemas
+    # =========================================================================
+    OrchestrateRequest:
+      type: object
+      required: [pattern, tasks]
+      properties:
+        pattern:
+          type: string
+          enum: [sequential, parallel, conditional, map-reduce, self-critique, discussion]
+        tasks:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [id, agentType]
+            properties:
+              id:
+                type: string
+              agentType:
+                type: string
+                enum: [claude, strudel, custom]
+              agentId:
+                type: string
+              promptTemplateId:
+                type: string
+              prompt:
+                type: string
+              variables:
+                type: object
+              timeoutMs:
+                type: integer
+              condition:
+                type: string
+              input: {}
+        context:
+          type: object
+          additionalProperties: true
+        timeoutMs:
+          type: integer
+          minimum: 1000
+          maximum: 600000
+        options:
+          type: object
+          additionalProperties: true
+
+    OrchestrationResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+            status:
+              type: string
+              enum: [completed, failed, timeout]
+            results:
+              type: array
+              items:
+                type: object
+            aggregatedOutput: {}
+            durationMs:
+              type: integer
+            error:
+              type: string
+
+    OrchestrationMetricsResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            total:
+              type: integer
+            byPattern:
+              type: object
+              additionalProperties:
+                type: integer
+            byStatus:
+              type: object
+              additionalProperties:
+                type: integer
+            avgDurationMs:
+              type: number
+            successRate:
+              type: number
+
+    # =========================================================================
+    # Collaboration Schemas
+    # =========================================================================
+    SelfCritiqueRequest:
+      type: object
+      required: [config]
+      properties:
+        task:
+          type: object
+          properties:
+            id:
+              type: string
+            agentType:
+              type: string
+              enum: [claude, strudel, custom]
+            agentId:
+              type: string
+            prompt:
+              type: string
+        agentId:
+          type: string
+        agentType:
+          type: string
+          enum: [claude, strudel, custom]
+        prompt:
+          type: string
+        config:
+          type: object
+          required: [maxIterations]
+          properties:
+            maxIterations:
+              type: integer
+              minimum: 1
+              maximum: 10
+            qualityCriteria:
+              type: array
+              items:
+                type: object
+                required: [name, description, weight]
+                properties:
+                  name:
+                    type: string
+                  description:
+                    type: string
+                  weight:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                  threshold:
+                    type: number
+            stopOnQualityThreshold:
+              type: number
+              minimum: 0
+              maximum: 1
+            improvementPromptTemplate:
+              type: string
+            evaluationPromptTemplate:
+              type: string
+        context:
+          type: object
+          additionalProperties: true
+        timeoutMs:
+          type: integer
+
+    SelfCritiqueResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+            status:
+              type: string
+              enum: [completed, failed, timeout]
+            iterations:
+              type: array
+              items:
+                type: object
+            finalOutput:
+              type: string
+            finalQualityScore:
+              type: number
+            totalIterations:
+              type: integer
+            durationMs:
+              type: integer
+            error:
+              type: string
+
+    CritiqueMetricsResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            total:
+              type: integer
+            avgIterations:
+              type: number
+            avgQualityImprovement:
+              type: number
+            successRate:
+              type: number
+
+    DiscussionRequest:
+      type: object
+      required: [topic, config]
+      properties:
+        topic:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        participants:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: object
+            required: [agentId, role]
+            properties:
+              id:
+                type: string
+              agentId:
+                type: string
+              role:
+                type: string
+              weight:
+                type: number
+              perspective:
+                type: string
+              systemPrompt:
+                type: string
+        config:
+          type: object
+          required: [maxRounds]
+          properties:
+            maxRounds:
+              type: integer
+              minimum: 1
+              maximum: 10
+            participants:
+              type: array
+              items:
+                type: object
+            discussionPromptTemplate:
+              type: string
+            synthesisPromptTemplate:
+              type: string
+            consensusStrategy:
+              type: string
+              enum: [unanimous, majority, weighted, facilitator]
+            facilitatorAgentId:
+              type: string
+            convergenceThreshold:
+              type: number
+              minimum: 0
+              maximum: 1
+        context:
+          type: object
+          additionalProperties: true
+        timeoutMs:
+          type: integer
+
+    DiscussionResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+            status:
+              type: string
+              enum: [completed, failed, timeout]
+            rounds:
+              type: array
+              items:
+                type: object
+            synthesis:
+              type: string
+            consensusReached:
+              type: boolean
+            convergenceScore:
+              type: number
+            totalRounds:
+              type: integer
+            durationMs:
+              type: integer
+            error:
+              type: string
+
+    DiscussionMetricsResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            total:
+              type: integer
+            avgRounds:
+              type: number
+            consensusRate:
+              type: number
+            avgConvergenceScore:
+              type: number

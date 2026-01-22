@@ -15,6 +15,7 @@ import { existsSync } from 'fs';
 
 import Anthropic from '@anthropic-ai/sdk';
 
+import { serverConfig } from '../config/server.config.js';
 import { generateRequestId } from '../utils/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -270,6 +271,11 @@ export function isClaudeAvailable(): boolean {
  * Checks rate limit for a user
  */
 async function checkRateLimit(userId: string): Promise<{ allowed: boolean; remaining: number }> {
+  // Skip rate limiting in development mode
+  if (serverConfig.env === 'development') {
+    return { allowed: true, remaining: DEFAULT_RATE_LIMIT };
+  }
+
   if (!isRedisConnected()) {
     // Allow if Redis is not available
     return { allowed: true, remaining: DEFAULT_RATE_LIMIT };
@@ -841,7 +847,7 @@ async function executeViaApi(
       const messages: Anthropic.MessageParam[] = [{ role: 'user', content: config.prompt }];
 
       const response = await anthropicClient.messages.create({
-        model: config.model ?? 'claude-sonnet-4-20250514',
+        model: config.model ?? 'claude-opus-4-5-20251101',
         max_tokens: config.maxTokens ?? 4096,
         system: config.systemPrompt,
         messages,

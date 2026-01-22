@@ -164,10 +164,19 @@ export async function spawnProcess(options: SpawnOptions): Promise<string> {
       inMemoryActiveIds.add(id);
     }
 
+    // Build environment - filter out ANTHROPIC_API_KEY to ensure Claude CLI
+    // uses user's Claude Code authentication instead of external API keys
+    const filteredEnv: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (key !== 'ANTHROPIC_API_KEY') {
+        filteredEnv[key] = value;
+      }
+    }
+
     // Spawn the process
     const childProcess = spawn(command, args, {
       cwd,
-      env: { ...process.env, ...env },
+      env: { ...filteredEnv, ...env },
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
     });

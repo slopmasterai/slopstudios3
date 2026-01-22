@@ -1,146 +1,251 @@
 /**
  * Auth Routes
- * Implements authentication endpoints with session cookie support
+ * Implements JWT-based authentication endpoints
  */
 
-/* eslint-disable @typescript-eslint/strict-boolean-expressions */
-/* eslint-disable @typescript-eslint/no-unnecessary-condition */
-/* eslint-disable @typescript-eslint/require-await */
-/* eslint-disable @typescript-eslint/return-await */
-/* eslint-disable @typescript-eslint/no-misused-promises */
-/* eslint-disable @typescript-eslint/no-floating-promises */
-
+import { Type, type Static } from '@sinclair/typebox';
+import * as bcrypt from 'bcrypt';
 import { serverConfig } from '../config/server.config.js';
-import { validateSession, validateAuthOrSession } from '../middleware/session.middleware.js';
-import {
-  createSession,
-  destroySession,
-  destroyAllUserSessions,
-} from '../services/session.service.js';
+import { getRedisClient, isRedisConnected } from '../services/redis.service.js';
 import { timestamp, generateRequestId } from '../utils/index.js';
 import { logger } from '../utils/logger.js';
 
 import type { ApiResponse } from '../types/index.js';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 
-interface LoginBody {
-  userId: string;
-  email?: string;
+// Schema definitions
+const RegisterSchema = Type.Object({
+  name: Type.String({ minLength: 1, maxLength: 100 }),
+  email: Type.String({ format: 'email' }),
+  password: Type.String({ minLength: 6, maxLength: 100 }),
+});
+
+type RegisterBody = Static<typeof RegisterSchema>;
+
+const LoginSchema = Type.Object({
+  email: Type.String({ format: 'email' }),
+  password: Type.String({ minLength: 1 }),
+});
+
+type LoginBody = Static<typeof LoginSchema>;
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+  role: 'user' | 'admin';
+  createdAt: string;
+  updatedAt: string;
 }
 
-interface LoginResponse {
-  sessionId: string;
-  userId: string;
-  expiresAt: string;
+interface AuthResponse {
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: 'user' | 'admin';
+    createdAt: string;
+    updatedAt: string;
+  };
+  token: string;
+  expiresIn: number;
 }
 
-interface LogoutResponse {
-  message: string;
+// Helper to get user from Redis
+async function getUserByEmail(email: string): Promise<User | null> {
+  if (!isRedisConnected()) return null;
+  const redis = getRedisClient();
+  const userData = await redis.get(`user:email:${email.toLowerCase()}`);
+  if (!userData) return null;
+  return JSON.parse(userData) as User;
+}
+
+async function getUserById(id: string): Promise<User | null> {
+  if (!isRedisConnected()) return null;
+  const redis = getRedisClient();
+  const userData = await redis.get(`user:${id}`);
+  if (!userData) return null;
+  return JSON.parse(userData) as User;
+}
+
+async function createUser(name: string, email: string, password: string): Promise<User> {
+  if (!isRedisConnected()) {
+    throw new Error('Redis not connected');
+  }
+
+  const redis = getRedisClient();
+  const normalizedEmail = email.toLowerCase();
+
+  // Check if user already exists
+  const existing = await getUserByEmail(normalizedEmail);
+  if (existing) {
+    throw new Error('User with this email already exists');
+  }
+
+  // Hash password
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  // Create user
+  const now = new Date().toISOString();
+  const user: User = {
+    id: `user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+    name,
+    email: normalizedEmail,
+    passwordHash,
+    role: 'user',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  // Store user by ID and email
+  await redis.set(`user:${user.id}`, JSON.stringify(user));
+  await redis.set(`user:email:${normalizedEmail}`, JSON.stringify(user));
+
+  logger.info({ userId: user.id, email: user.email }, 'User created');
+
+  return user;
 }
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   /**
-   * POST /auth/login - Create a new session
-   * Sets session_id cookie for subsequent requests
+   * POST /api/v1/auth/register - Register a new user
+   */
+  app.post<{ Body: RegisterBody }>(
+    '/api/v1/auth/register',
+    {
+      schema: { body: RegisterSchema },
+    },
+    async (request: FastifyRequest<{ Body: RegisterBody }>, reply: FastifyReply) => {
+      const { name, email, password } = request.body;
+
+      try {
+        const user = await createUser(name, email, password);
+
+        // Generate JWT token
+        const token = app.jwt.sign(
+          { id: user.id, email: user.email, name: user.name, role: user.role },
+          { expiresIn: serverConfig.jwt.expiresIn }
+        );
+
+        const expiresIn = typeof serverConfig.jwt.expiresIn === 'string'
+          ? parseInt(serverConfig.jwt.expiresIn) || 86400
+          : serverConfig.jwt.expiresIn;
+
+        const response: ApiResponse<AuthResponse> = {
+          success: true,
+          data: {
+            user: {
+              id: user.id,
+              email: user.email,
+              name: user.name,
+              role: user.role,
+              createdAt: user.createdAt,
+              updatedAt: user.updatedAt,
+            },
+            token,
+            expiresIn,
+          },
+          meta: {
+            timestamp: timestamp(),
+            requestId: request.id || generateRequestId(),
+          },
+        };
+
+        return reply.status(201).send(response);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.error({ email, error: errorMessage }, 'Failed to register user');
+
+        const statusCode = errorMessage.includes('already exists') ? 409 : 500;
+        const response: ApiResponse<null> = {
+          success: false,
+          error: {
+            code: statusCode === 409 ? 'USER_EXISTS' : 'REGISTRATION_FAILED',
+            message: errorMessage,
+          },
+          meta: {
+            timestamp: timestamp(),
+            requestId: request.id || generateRequestId(),
+          },
+        };
+
+        return reply.status(statusCode).send(response);
+      }
+    }
+  );
+
+  /**
+   * POST /api/v1/auth/login - Login with email and password
    */
   app.post<{ Body: LoginBody }>(
-    '/auth/login',
+    '/api/v1/auth/login',
     {
-      schema: {
-        body: {
-          type: 'object',
-          required: ['userId'],
-          properties: {
-            userId: { type: 'string', minLength: 1 },
-            email: { type: 'string', format: 'email' },
-          },
-        },
-      },
+      schema: { body: LoginSchema },
     },
     async (request: FastifyRequest<{ Body: LoginBody }>, reply: FastifyReply) => {
-      const { userId, email } = request.body;
+      const { email, password } = request.body;
 
       try {
-        // Create session in Redis with request metadata
-        const sessionId = await createSession(userId, {
-          ipAddress: request.ip,
-          userAgent: request.headers['user-agent'],
-          data: { email },
-        });
+        const user = await getUserByEmail(email);
 
-        // Calculate expiration time
-        const expiresAt = new Date(Date.now() + serverConfig.session.ttl * 1000).toISOString();
-
-        // Set session data via the @fastify/session plugin
-        // The session is automatically persisted to Redis by @fastify/session
-        request.session.userId = userId;
-        request.session.sessionId = sessionId;
-        if (email) {
-          request.session.email = email;
+        if (!user) {
+          const response: ApiResponse<null> = {
+            success: false,
+            error: {
+              code: 'INVALID_CREDENTIALS',
+              message: 'Invalid email or password',
+            },
+            meta: {
+              timestamp: timestamp(),
+              requestId: request.id || generateRequestId(),
+            },
+          };
+          return reply.status(401).send(response);
         }
 
-        logger.info({ userId, sessionId, ip: request.ip }, 'User logged in, session created');
-
-        const response: ApiResponse<LoginResponse> = {
-          success: true,
-          data: {
-            sessionId,
-            userId,
-            expiresAt,
-          },
-          meta: {
-            timestamp: timestamp(),
-            requestId: request.id || generateRequestId(),
-          },
-        };
-
-        return reply.status(200).send(response);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        logger.error({ userId, error: errorMessage }, 'Failed to create session');
-
-        const response: ApiResponse<null> = {
-          success: false,
-          error: {
-            code: 'SESSION_CREATE_FAILED',
-            message: 'Failed to create session',
-          },
-          meta: {
-            timestamp: timestamp(),
-            requestId: request.id || generateRequestId(),
-          },
-        };
-
-        return reply.status(500).send(response);
-      }
-    }
-  );
-
-  /**
-   * POST /auth/logout - Destroy current session
-   * Requires valid session via cookie or header
-   */
-  app.post(
-    '/auth/logout',
-    { preHandler: validateSession },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      try {
-        const sessionId = request.session?.sessionId;
-
-        if (sessionId) {
-          // Destroy session in Redis
-          await destroySession(sessionId);
+        // Verify password
+        const validPassword = await bcrypt.compare(password, user.passwordHash);
+        if (!validPassword) {
+          const response: ApiResponse<null> = {
+            success: false,
+            error: {
+              code: 'INVALID_CREDENTIALS',
+              message: 'Invalid email or password',
+            },
+            meta: {
+              timestamp: timestamp(),
+              requestId: request.id || generateRequestId(),
+            },
+          };
+          return reply.status(401).send(response);
         }
 
-        // Destroy Fastify session (clears cookie)
-        request.session.destroy();
+        // Generate JWT token
+        const token = app.jwt.sign(
+          { id: user.id, email: user.email, name: user.name, role: user.role },
+          { expiresIn: serverConfig.jwt.expiresIn }
+        );
 
-        logger.info({ sessionId, userId: request.user?.id }, 'User logged out');
+        const expiresIn = typeof serverConfig.jwt.expiresIn === 'string'
+          ? parseInt(serverConfig.jwt.expiresIn) || 86400
+          : serverConfig.jwt.expiresIn;
 
-        const response: ApiResponse<LogoutResponse> = {
+        logger.info({ userId: user.id, email: user.email }, 'User logged in');
+
+        const response: ApiResponse<AuthResponse> = {
           success: true,
           data: {
-            message: 'Successfully logged out',
+            user: {
+              id: user.id,
+              email: user.email,
+              name: user.name,
+              role: user.role,
+              createdAt: user.createdAt,
+              updatedAt: user.updatedAt,
+            },
+            token,
+            expiresIn,
           },
           meta: {
             timestamp: timestamp(),
@@ -151,13 +256,13 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(200).send(response);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        logger.error({ error: errorMessage }, 'Failed to logout');
+        logger.error({ email, error: errorMessage }, 'Failed to login');
 
         const response: ApiResponse<null> = {
           success: false,
           error: {
-            code: 'LOGOUT_FAILED',
-            message: 'Failed to logout',
+            code: 'LOGIN_FAILED',
+            message: 'Login failed',
           },
           meta: {
             timestamp: timestamp(),
@@ -171,93 +276,17 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   );
 
   /**
-   * POST /auth/logout-all - Destroy all sessions for the current user
-   * Requires valid session via cookie or header
+   * POST /api/v1/auth/logout - Logout (client-side token invalidation)
    */
   app.post(
-    '/auth/logout-all',
-    { preHandler: validateAuthOrSession },
+    '/api/v1/auth/logout',
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const userId = request.user?.id;
-
-      if (!userId) {
-        const response: ApiResponse<null> = {
-          success: false,
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'User ID not found',
-          },
-          meta: {
-            timestamp: timestamp(),
-            requestId: request.id || generateRequestId(),
-          },
-        };
-
-        return reply.status(401).send(response);
-      }
-
-      try {
-        // Destroy all sessions for this user
-        const count = await destroyAllUserSessions(userId);
-
-        // Destroy current Fastify session (clears cookie)
-        request.session.destroy();
-
-        logger.info({ userId, sessionsDestroyed: count }, 'All user sessions destroyed');
-
-        const response: ApiResponse<{ sessionsDestroyed: number }> = {
-          success: true,
-          data: {
-            sessionsDestroyed: count,
-          },
-          meta: {
-            timestamp: timestamp(),
-            requestId: request.id || generateRequestId(),
-          },
-        };
-
-        return reply.status(200).send(response);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        logger.error({ userId, error: errorMessage }, 'Failed to destroy all sessions');
-
-        const response: ApiResponse<null> = {
-          success: false,
-          error: {
-            code: 'LOGOUT_ALL_FAILED',
-            message: 'Failed to destroy all sessions',
-          },
-          meta: {
-            timestamp: timestamp(),
-            requestId: request.id || generateRequestId(),
-          },
-        };
-
-        return reply.status(500).send(response);
-      }
-    }
-  );
-
-  /**
-   * GET /auth/session - Get current session info
-   * Requires valid session via cookie or header
-   */
-  app.get(
-    '/auth/session',
-    { preHandler: validateAuthOrSession },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const user = request.user;
-
-      const response: ApiResponse<{
-        userId: string | undefined;
-        email?: string;
-        sessionId?: string;
-      }> = {
+      // JWT tokens are stateless - logout is handled client-side
+      // We just acknowledge the request
+      const response: ApiResponse<{ message: string }> = {
         success: true,
         data: {
-          userId: user?.id,
-          email: user?.email,
-          sessionId: request.session?.sessionId,
+          message: 'Successfully logged out',
         },
         meta: {
           timestamp: timestamp(),
@@ -268,6 +297,133 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(200).send(response);
     }
   );
+
+  /**
+   * GET /api/v1/auth/me - Get current user info
+   */
+  app.get(
+    '/api/v1/auth/me',
+    {
+      preHandler: async (request: FastifyRequest, reply: FastifyReply) => {
+        try {
+          await request.jwtVerify();
+        } catch {
+          const response: ApiResponse<null> = {
+            success: false,
+            error: {
+              code: 'UNAUTHORIZED',
+              message: 'Invalid or expired token',
+            },
+            meta: {
+              timestamp: timestamp(),
+              requestId: request.id || generateRequestId(),
+            },
+          };
+          return reply.status(401).send(response);
+        }
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const tokenUser = request.user as { id: string; email: string; name: string; role: string };
+
+      const user = await getUserById(tokenUser.id);
+      if (!user) {
+        const response: ApiResponse<null> = {
+          success: false,
+          error: {
+            code: 'USER_NOT_FOUND',
+            message: 'User not found',
+          },
+          meta: {
+            timestamp: timestamp(),
+            requestId: request.id || generateRequestId(),
+          },
+        };
+        return reply.status(404).send(response);
+      }
+
+      const response: ApiResponse<{
+        id: string;
+        email: string;
+        name: string;
+        role: string;
+        createdAt: string;
+        updatedAt: string;
+      }> = {
+        success: true,
+        data: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+        },
+        meta: {
+          timestamp: timestamp(),
+          requestId: request.id || generateRequestId(),
+        },
+      };
+
+      return reply.status(200).send(response);
+    }
+  );
+
+  /**
+   * POST /api/v1/auth/refresh - Refresh JWT token
+   */
+  app.post(
+    '/api/v1/auth/refresh',
+    {
+      preHandler: async (request: FastifyRequest, reply: FastifyReply) => {
+        try {
+          await request.jwtVerify();
+        } catch {
+          const response: ApiResponse<null> = {
+            success: false,
+            error: {
+              code: 'UNAUTHORIZED',
+              message: 'Invalid or expired token',
+            },
+            meta: {
+              timestamp: timestamp(),
+              requestId: request.id || generateRequestId(),
+            },
+          };
+          return reply.status(401).send(response);
+        }
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const tokenUser = request.user as { id: string; email: string; name: string; role: string };
+
+      // Generate new token
+      const token = app.jwt.sign(
+        { id: tokenUser.id, email: tokenUser.email, name: tokenUser.name, role: tokenUser.role },
+        { expiresIn: serverConfig.jwt.expiresIn }
+      );
+
+      const expiresIn = typeof serverConfig.jwt.expiresIn === 'string'
+        ? parseInt(serverConfig.jwt.expiresIn) || 86400
+        : serverConfig.jwt.expiresIn;
+
+      const response: ApiResponse<{ token: string; expiresIn: number }> = {
+        success: true,
+        data: {
+          token,
+          expiresIn,
+        },
+        meta: {
+          timestamp: timestamp(),
+          requestId: request.id || generateRequestId(),
+        },
+      };
+
+      return reply.status(200).send(response);
+    }
+  );
+
+  logger.info('Auth routes registered');
 }
 
 export default registerAuthRoutes;

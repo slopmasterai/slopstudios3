@@ -36,6 +36,7 @@ interface MusicDiscussionPanelProps {
   consensusScore: number | null;
   finalConsensus: string | null;
   error?: string | null;
+  onApplyCode?: (code: string) => void;
   className?: string;
 }
 
@@ -74,6 +75,7 @@ export function MusicDiscussionPanel({
   consensusScore,
   finalConsensus,
   error,
+  onApplyCode,
   className,
 }: MusicDiscussionPanelProps) {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -114,7 +116,7 @@ export function MusicDiscussionPanel({
       >
         <div className="flex items-center gap-2">
           <MessageSquare className="h-4 w-4 text-blue-500" />
-          <span className="text-sm font-medium">Music Expert Discussion</span>
+          <span className="text-sm font-medium">Expert Collaboration</span>
         </div>
         <div className="flex items-center gap-2">
           {/* Status Badge */}
@@ -183,6 +185,7 @@ export function MusicDiscussionPanel({
                 round={round}
                 isCompleted
                 defaultExpanded={index === rounds.length - 1 && !isRunning}
+                onApplyCode={onApplyCode}
               />
             ))}
 
@@ -236,19 +239,19 @@ export function MusicDiscussionPanel({
             </Button>
           )}
 
-          {/* Final Consensus */}
+          {/* Final Synthesized Code */}
           {isCompleted && finalConsensus && (
             <Card className="border-2 border-primary bg-primary/5">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
                   <CheckCircle className="h-4 w-4 text-primary" />
-                  Expert Consensus
+                  Synthesized Improvement
                   {consensusScore !== null && (
                     <Badge
                       variant={consensusPercent >= 70 ? 'success' : 'warning'}
                       className="ml-auto"
                     >
-                      {consensusPercent}% Agreement
+                      {consensusPercent}% Quality
                     </Badge>
                   )}
                 </CardTitle>
@@ -262,7 +265,7 @@ export function MusicDiscussionPanel({
           {/* Completion message without consensus */}
           {isCompleted && !finalConsensus && rounds.length > 0 && (
             <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
-              Discussion completed. Review the round summaries above for expert feedback.
+              Collaboration completed. Click Apply on the latest round to use the improved code.
             </div>
           )}
         </div>

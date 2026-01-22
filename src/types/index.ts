@@ -2,6 +2,12 @@
  * Core type definitions for Slop Studios 3
  */
 
+// Re-export branded types
+export * from './branded.types.js';
+
+// Re-export utility types
+export * from './utility.types.js';
+
 export interface Config {
   env: 'development' | 'staging' | 'production';
   port: number;
@@ -14,6 +20,9 @@ export interface ApiResponse<T> {
   error?: {
     code: string;
     message: string;
+    category?: string;
+    details?: Record<string, unknown>;
+    retryAfter?: number;
   };
   meta?: {
     timestamp: string;

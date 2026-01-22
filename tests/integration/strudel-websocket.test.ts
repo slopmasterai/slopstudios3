@@ -92,12 +92,14 @@ jest.mock('web-audio-engine', () => {
     value: 0,
     setValueAtTime: jest.fn().mockReturnThis(),
     linearRampToValueAtTime: jest.fn().mockReturnThis(),
+    exponentialRampToValueAtTime: jest.fn().mockReturnThis(),
   };
 
   const mockGainNode = {
     gain: { ...mockAudioParam },
     connect: jest.fn().mockReturnThis(),
     disconnect: jest.fn(),
+    _output: null, // Used by effects service
   };
 
   const mockOscillatorNode = {
@@ -114,11 +116,36 @@ jest.mock('web-audio-engine', () => {
     disconnect: jest.fn(),
   };
 
+  const mockDelayNode = {
+    delayTime: { ...mockAudioParam },
+    connect: jest.fn().mockReturnThis(),
+    disconnect: jest.fn(),
+  };
+
+  const mockBiquadFilterNode = {
+    type: 'lowpass',
+    frequency: { ...mockAudioParam },
+    Q: { ...mockAudioParam },
+    gain: { ...mockAudioParam },
+    connect: jest.fn().mockReturnThis(),
+    disconnect: jest.fn(),
+  };
+
+  const mockBufferSourceNode = {
+    buffer: null,
+    playbackRate: { ...mockAudioParam },
+    connect: jest.fn().mockReturnThis(),
+    disconnect: jest.fn(),
+    start: jest.fn(),
+    stop: jest.fn(),
+  };
+
   const mockBuffer = {
     length: 44100,
     numberOfChannels: 2,
     sampleRate: 44100,
     getChannelData: jest.fn(() => new Float32Array(44100)),
+    copyToChannel: jest.fn(),
   };
 
   return {
@@ -130,6 +157,11 @@ jest.mock('web-audio-engine', () => {
       createGain: jest.fn(() => ({ ...mockGainNode })),
       createChannelMerger: jest.fn(() => ({ ...mockMerger })),
       createChannelSplitter: jest.fn(() => ({ ...mockMerger })),
+      createDelay: jest.fn(() => ({ ...mockDelayNode })),
+      createBiquadFilter: jest.fn(() => ({ ...mockBiquadFilterNode })),
+      createBufferSource: jest.fn(() => ({ ...mockBufferSourceNode })),
+      createBuffer: jest.fn(() => ({ ...mockBuffer })),
+      decodeAudioData: jest.fn().mockResolvedValue(mockBuffer),
       startRendering: jest.fn().mockResolvedValue(mockBuffer),
     })),
   };

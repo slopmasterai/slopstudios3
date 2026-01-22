@@ -14,6 +14,9 @@ import fastifyHelmet from '@fastify/helmet';
 import fastifyJwt from '@fastify/jwt';
 import fastifyRateLimit from '@fastify/rate-limit';
 import fastifySession from '@fastify/session';
+import fastifyStatic from '@fastify/static';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { RedisStore } from 'connect-redis';
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from 'fastify';
 
@@ -46,8 +49,7 @@ export async function createHttpServer(): Promise<FastifyInstance> {
   // Register error handler
   app.setErrorHandler(errorHandler);
 
-  // Register not found handler
-  app.setNotFoundHandler(notFoundHandler);
+  // Note: notFoundHandler is set in registerPlugins after static file serving
 
   fastifyInstance = app;
   return app;
@@ -148,6 +150,30 @@ async function registerPlugins(app: FastifyInstance): Promise<void> {
   // Add request ID to response headers
   app.addHook('onSend', async (request, reply) => {
     reply.header('X-Request-ID', request.id);
+  });
+
+  // 7. Serve static frontend files (production build)
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const clientDistPath = path.join(__dirname, '../../client/dist');
+
+  await app.register(fastifyStatic, {
+    root: clientDistPath,
+    prefix: '/',
+    decorateReply: false,
+  });
+
+  // Serve index.html for SPA routes (client-side routing)
+  app.setNotFoundHandler(async (request, reply) => {
+    // If it's an API route, return 404
+    if (request.url.startsWith('/api/') || request.url.startsWith('/health')) {
+      return reply.status(404).send({
+        success: false,
+        error: { code: 'NOT_FOUND', message: `Route ${request.method} ${request.url} not found` },
+      });
+    }
+    // Otherwise serve the SPA
+    return reply.sendFile('index.html');
   });
 }
 
