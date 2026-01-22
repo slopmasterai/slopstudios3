@@ -94,7 +94,7 @@ Phase 2 will configure the development environment including:
 
 ## Resources & Access
 
-- Repository: Local at `/Users/cyluswatson/slopstudios3`
+- Repository: Local project root directory
 - Remote: https://github.com/slopstudios/slopstudios3 (when pushed)
 
 ## Questions for Next AI

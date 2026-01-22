@@ -74,7 +74,7 @@ if [ ! -f ".env" ]; then
 NODE_ENV=development
 PORT=3000
 HOST=0.0.0.0
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/slopstudios3
+DATABASE_URL=postgresql://postgres:devpassword@localhost:5432/slopstudios3
 REDIS_URL=redis://localhost:6379
 JWT_SECRET=local-dev-secret-change-for-production
 APP_SECRET=local-app-secret-change-for-production

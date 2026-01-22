@@ -267,7 +267,7 @@ function loadConfig(): ServerConfig {
       expiresIn: getEnvString('JWT_EXPIRES_IN', '7d'),
     },
     database: {
-      url: getEnvString('DATABASE_URL', 'postgresql://user:password@localhost:5432/slopstudios3'),
+      url: getEnvString('DATABASE_URL', 'postgresql://user:YOUR_DB_PASSWORD@localhost:5432/slopstudios3'),
       poolSize: getEnvNumber('DATABASE_POOL_SIZE', 10),
       ssl: getEnvBoolean('DATABASE_SSL', false),
     },

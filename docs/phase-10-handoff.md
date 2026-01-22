@@ -80,7 +80,7 @@ The project is now ready for application development:
 
 | Resource           | Location                          |
 | ------------------ | --------------------------------- |
-| Source Code        | `/Users/cyluswatson/slopstudios3` |
+| Source Code        | Project root directory            |
 | Documentation      | `docs/` directory                 |
 | CI/CD              | GitHub Actions                    |
 | Container Registry | GHCR (when pushed)                |

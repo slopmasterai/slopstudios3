@@ -187,7 +187,7 @@ describe('Auth API', () => {
         url: '/api/v1/auth/login',
         payload: {
           email: 'test@example.com',
-          password: 'password123',
+          password: TEST_CONSTANTS.VALID_PASSWORD,
         },
       });
 
@@ -203,7 +203,7 @@ describe('Auth API', () => {
         url: '/api/v1/auth/login',
         payload: {
           email: 'test@example.com',
-          password: 'wrong',
+          password: 'invalid-test-value',
         },
       });
 
@@ -224,7 +224,7 @@ describe('Protected API', () => {
     const loginResponse = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/login',
-      payload: { email: 'test@example.com', password: 'password123' },
+      payload: { email: 'test@example.com', password: TEST_CONSTANTS.VALID_PASSWORD },
     });
     token = JSON.parse(loginResponse.payload).data.token;
   });

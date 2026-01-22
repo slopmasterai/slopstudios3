@@ -71,8 +71,8 @@ export function createDelayedMock<T>(value: T, delayMs = 100): jest.Mock<Promise
 export const TEST_CONSTANTS = {
   VALID_EMAIL: 'test@example.com',
   INVALID_EMAIL: 'not-an-email',
-  VALID_PASSWORD: 'SecureP@ssw0rd!',
-  WEAK_PASSWORD: '123',
+  VALID_PASSWORD: 'Test-Valid-Pass-123!',
+  WEAK_PASSWORD: 'x',
   TEST_USER_ID: 'user_test_123',
   TEST_REQUEST_ID: 'req_test_456',
 } as const;

@@ -61,7 +61,7 @@ services:
       - NODE_ENV=development
       - PORT=3000
       - HOST=0.0.0.0
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/slopstudios3
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-devpassword}@db:5432/slopstudios3
       - REDIS_URL=redis://redis:6379
       - JWT_SECRET=dev-jwt-secret-change-in-production
       - APP_SECRET=dev-app-secret-change-in-production
@@ -95,7 +95,7 @@ services:
       - "5432:5432"
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-devpassword}
       - POSTGRES_DB=slopstudios3
     volumes:
       - postgres-data:/var/lib/postgresql/data
